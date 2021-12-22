@@ -35,6 +35,13 @@ version <next>:
 - bitpacked encoder
 - VideoToolbox VP9 hwaccel
 - VideoToolbox ProRes hwaccel
+- support loongarch.
+- aspectralstats audio filter
+- adynamicsmooth audio filter
+- libplacebo filter
+- vflip_vulkan, hflip_vulkan and flip_vulkan filters
+- adynamicequalizer audio filter
+- yadif_videotoolbox filter
 
 
 version 4.4:

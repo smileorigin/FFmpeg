@@ -885,15 +885,16 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
     ff_set_cmp(&s->mecc, s->mecc.ildct_cmp,      avctx->ildct_cmp);
     ff_set_cmp(&s->mecc, s->mecc.frame_skip_cmp, s->frame_skip_cmp);
 
-    if (CONFIG_H261_ENCODER && s->out_format == FMT_H261)
+    if (CONFIG_H261_ENCODER && s->out_format == FMT_H261) {
         ff_h261_encode_init(s);
-    if (CONFIG_H263_ENCODER && s->out_format == FMT_H263)
-        ff_h263_encode_init(s);
-    if (CONFIG_MSMPEG4_ENCODER && s->msmpeg4_version)
-        ff_msmpeg4_encode_init(s);
-    if ((CONFIG_MPEG1VIDEO_ENCODER || CONFIG_MPEG2VIDEO_ENCODER)
-        && s->out_format == FMT_MPEG1)
+    } else if ((CONFIG_MPEG1VIDEO_ENCODER || CONFIG_MPEG2VIDEO_ENCODER)
+               && s->out_format == FMT_MPEG1) {
         ff_mpeg1_encode_init(s);
+    } else if (CONFIG_H263_ENCODER && s->out_format == FMT_H263) {
+        ff_h263_encode_init(s);
+        if (CONFIG_MSMPEG4_ENCODER && s->msmpeg4_version)
+            ff_msmpeg4_encode_init(s);
+    }
 
     /* init q matrix */
     for (i = 0; i < 64; i++) {
@@ -1658,8 +1659,7 @@ static int frame_start(MpegEncContext *s)
 
     if (s->pict_type != AV_PICTURE_TYPE_B) {
         s->last_picture_ptr = s->next_picture_ptr;
-        if (!s->droppable)
-            s->next_picture_ptr = s->current_picture_ptr;
+        s->next_picture_ptr = s->current_picture_ptr;
     }
 
     if (s->last_picture_ptr) {
@@ -3521,7 +3521,7 @@ static int encode_picture(MpegEncContext *s, int picture_number)
 
     /* we need to initialize some time vars before we can encode B-frames */
     // RAL: Condition added for MPEG1VIDEO
-    if (s->codec_id == AV_CODEC_ID_MPEG1VIDEO || s->codec_id == AV_CODEC_ID_MPEG2VIDEO || (s->h263_pred && !s->msmpeg4_version))
+    if (s->out_format == FMT_MPEG1 || (s->h263_pred && !s->msmpeg4_version))
         set_frame_distances(s);
     if(CONFIG_MPEG4_ENCODER && s->codec_id == AV_CODEC_ID_MPEG4)
         ff_set_mpeg4_time(s);
@@ -3550,7 +3550,7 @@ static int encode_picture(MpegEncContext *s, int picture_number)
         update_qscale(s);
     }
 
-    if(s->codec_id != AV_CODEC_ID_AMV && s->codec_id != AV_CODEC_ID_MJPEG){
+    if (s->out_format != FMT_MJPEG) {
         if(s->q_chroma_intra_matrix   != s->q_intra_matrix  ) av_freep(&s->q_chroma_intra_matrix);
         if(s->q_chroma_intra_matrix16 != s->q_intra_matrix16) av_freep(&s->q_chroma_intra_matrix16);
         s->q_chroma_intra_matrix   = s->q_intra_matrix;
@@ -3696,28 +3696,27 @@ static int encode_picture(MpegEncContext *s, int picture_number)
         ff_convert_matrix(s, s->q_chroma_intra_matrix, s->q_chroma_intra_matrix16,
                        s->chroma_intra_matrix, s->intra_quant_bias, 8, 8, 1);
         s->qscale= 8;
-    }
-    if(s->codec_id == AV_CODEC_ID_AMV){
-        static const uint8_t y[32]={13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13};
-        static const uint8_t c[32]={14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14};
-        for(i=1;i<64;i++){
-            int j= s->idsp.idct_permutation[ff_zigzag_direct[i]];
 
-            s->intra_matrix[j]        = sp5x_qscale_five_quant_table[0][i];
-            s->chroma_intra_matrix[j] = sp5x_qscale_five_quant_table[1][i];
+        if (s->codec_id == AV_CODEC_ID_AMV) {
+            static const uint8_t y[32] = {13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13};
+            static const uint8_t c[32] = {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14};
+            for (int i = 1; i < 64; i++) {
+                int j = s->idsp.idct_permutation[ff_zigzag_direct[i]];
+
+                s->intra_matrix[j]        = sp5x_qscale_five_quant_table[0][i];
+                s->chroma_intra_matrix[j] = sp5x_qscale_five_quant_table[1][i];
+            }
+            s->y_dc_scale_table = y;
+            s->c_dc_scale_table = c;
+            s->intra_matrix[0] = 13;
+            s->chroma_intra_matrix[0] = 14;
+            ff_convert_matrix(s, s->q_intra_matrix, s->q_intra_matrix16,
+                              s->intra_matrix, s->intra_quant_bias, 8, 8, 1);
+            ff_convert_matrix(s, s->q_chroma_intra_matrix, s->q_chroma_intra_matrix16,
+                              s->chroma_intra_matrix, s->intra_quant_bias, 8, 8, 1);
+            s->qscale = 8;
         }
-        s->y_dc_scale_table= y;
-        s->c_dc_scale_table= c;
-        s->intra_matrix[0] = 13;
-        s->chroma_intra_matrix[0] = 14;
-        ff_convert_matrix(s, s->q_intra_matrix, s->q_intra_matrix16,
-                       s->intra_matrix, s->intra_quant_bias, 8, 8, 1);
-        ff_convert_matrix(s, s->q_chroma_intra_matrix, s->q_chroma_intra_matrix16,
-                       s->chroma_intra_matrix, s->intra_quant_bias, 8, 8, 1);
-        s->qscale= 8;
-    }
-
-    if (s->out_format == FMT_SPEEDHQ) {
+    } else if (s->out_format == FMT_SPEEDHQ) {
         s->y_dc_scale_table=
         s->c_dc_scale_table= ff_mpeg2_dc_scale_table[3];
     }

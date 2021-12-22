@@ -103,8 +103,14 @@ typedef struct VulkanDevicePriv {
     /* Settings */
     int use_linear_images;
 
+    /* Option to allocate all image planes in a single allocation */
+    int contiguous_planes;
+
     /* Nvidia */
     int dev_is_nvidia;
+
+    /* Intel */
+    int dev_is_intel;
 } VulkanDevicePriv;
 
 typedef struct VulkanFramesPriv {
@@ -114,6 +120,9 @@ typedef struct VulkanFramesPriv {
     /* Image transfers */
     VulkanExecCtx upload_ctx;
     VulkanExecCtx download_ctx;
+
+    /* Modifier info list to free at uninit */
+    VkImageDrmFormatModifierListCreateInfoEXT *modifier_info;
 } VulkanFramesPriv;
 
 typedef struct AVVkFrameInternal {
@@ -232,6 +241,31 @@ const VkFormat *av_vkfmt_from_pixfmt(enum AVPixelFormat p)
         if (vk_pixfmt_map[i].pixfmt == p)
             return vk_pixfmt_map[i].vkfmts;
     return NULL;
+}
+
+static const void *vk_find_struct(const void *chain, VkStructureType stype)
+{
+    const VkBaseInStructure *in = chain;
+    while (in) {
+        if (in->sType == stype)
+            return in;
+
+        in = in->pNext;
+    }
+
+    return NULL;
+}
+
+static void vk_link_struct(void *chain, void *in)
+{
+    VkBaseOutStructure *out = chain;
+    if (!in)
+        return;
+
+    while (out->pNext)
+        out = out->pNext;
+
+    out->pNext = in;
 }
 
 static int pixfmt_is_supported(AVHWDeviceContext *dev_ctx, enum AVPixelFormat p,
@@ -1374,6 +1408,12 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
     if (opt_d)
         p->use_linear_images = strtol(opt_d->value, NULL, 10);
 
+    opt_d = av_dict_get(opts, "contiguous_planes", NULL, 0);
+    if (opt_d)
+        p->contiguous_planes = strtol(opt_d->value, NULL, 10);
+    else
+        p->contiguous_planes = -1;
+
     hwctx->enabled_dev_extensions = dev_info.ppEnabledExtensionNames;
     hwctx->nb_enabled_dev_extensions = dev_info.enabledExtensionCount;
 
@@ -1424,6 +1464,7 @@ static int vulkan_device_init(AVHWDeviceContext *ctx)
                p->hprops.minImportedHostPointerAlignment);
 
     p->dev_is_nvidia = (p->props.properties.vendorID == 0x10de);
+    p->dev_is_intel  = (p->props.properties.vendorID == 0x8086);
 
     vk->GetPhysicalDeviceQueueFamilyProperties(hwctx->phys_dev, &queue_num, NULL);
     if (!queue_num) {
@@ -1742,8 +1783,13 @@ static int alloc_bind_mem(AVHWFramesContext *hwfc, AVVkFrame *f,
     AVHWDeviceContext *ctx = hwfc->device_ctx;
     VulkanDevicePriv *p = ctx->internal->priv;
     FFVulkanFunctions *vk = &p->vkfn;
+    AVVulkanFramesContext *hwfctx = hwfc->hwctx;
     const int planes = av_pix_fmt_count_planes(hwfc->sw_format);
     VkBindImageMemoryInfo bind_info[AV_NUM_DATA_POINTERS] = { { 0 } };
+
+    VkMemoryRequirements cont_memory_requirements = { 0 };
+    int cont_mem_size_list[AV_NUM_DATA_POINTERS] = { 0 };
+    int cont_mem_size = 0;
 
     AVVulkanDeviceContext *hwctx = ctx->hwctx;
 
@@ -1771,6 +1817,27 @@ static int alloc_bind_mem(AVHWFramesContext *hwfc, AVVkFrame *f,
             req.memoryRequirements.size = FFALIGN(req.memoryRequirements.size,
                                                   p->props.properties.limits.minMemoryMapAlignment);
 
+        if (hwfctx->flags & AV_VK_FRAME_FLAG_CONTIGUOUS_MEMORY) {
+            if (ded_req.requiresDedicatedAllocation) {
+                av_log(hwfc, AV_LOG_ERROR, "Cannot allocate all planes in a single allocation, "
+                                           "device requires dedicated image allocation!\n");
+                return AVERROR(EINVAL);
+            } else if (!i) {
+                cont_memory_requirements = req.memoryRequirements;
+            } else if (cont_memory_requirements.memoryTypeBits !=
+                       req.memoryRequirements.memoryTypeBits) {
+                av_log(hwfc, AV_LOG_ERROR, "The memory requirements differ between plane 0 "
+                                           "and %i, cannot allocate in a single region!\n",
+                                           i);
+                return AVERROR(EINVAL);
+            }
+
+            cont_mem_size_list[i] = FFALIGN(req.memoryRequirements.size,
+                                            req.memoryRequirements.alignment);
+            cont_mem_size += cont_mem_size_list[i];
+            continue;
+        }
+
         /* In case the implementation prefers/requires dedicated allocation */
         use_ded_mem = ded_req.prefersDedicatedAllocation |
                       ded_req.requiresDedicatedAllocation;
@@ -1790,6 +1857,29 @@ static int alloc_bind_mem(AVHWFramesContext *hwfc, AVVkFrame *f,
         bind_info[i].sType  = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO;
         bind_info[i].image  = f->img[i];
         bind_info[i].memory = f->mem[i];
+    }
+
+    if (hwfctx->flags & AV_VK_FRAME_FLAG_CONTIGUOUS_MEMORY) {
+        cont_memory_requirements.size = cont_mem_size;
+
+        /* Allocate memory */
+        if ((err = alloc_mem(ctx, &cont_memory_requirements,
+                                f->tiling == VK_IMAGE_TILING_LINEAR ?
+                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT :
+                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                (void *)(((uint8_t *)alloc_pnext)),
+                                &f->flags, &f->mem[0])))
+            return err;
+
+        f->size[0] = cont_memory_requirements.size;
+
+        for (int i = 0; i < planes; i++) {
+            bind_info[i].sType  = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO;
+            bind_info[i].image  = f->img[i];
+            bind_info[i].memory = f->mem[0];
+            bind_info[i].memoryOffset = !i ? 0 : cont_mem_size_list[i - 1];
+            f->offset[i] = bind_info[i].memoryOffset;
+        }
     }
 
     /* Bind the allocated memory to the images */
@@ -2037,6 +2127,13 @@ static void try_export_flags(AVHWFramesContext *hwfc,
     AVVulkanDeviceContext *dev_hwctx = hwfc->device_ctx->hwctx;
     VulkanDevicePriv *p = hwfc->device_ctx->internal->priv;
     FFVulkanFunctions *vk = &p->vkfn;
+
+    const VkImageDrmFormatModifierListCreateInfoEXT *drm_mod_info =
+        vk_find_struct(hwctx->create_pnext,
+                       VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT);
+    int has_mods = hwctx->tiling == VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT && drm_mod_info;
+    int nb_mods;
+
     VkExternalImageFormatProperties eprops = {
         .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES_KHR,
     };
@@ -2044,9 +2141,18 @@ static void try_export_flags(AVHWFramesContext *hwfc,
         .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
         .pNext = &eprops,
     };
+    VkPhysicalDeviceImageDrmFormatModifierInfoEXT phy_dev_mod_info = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT,
+        .pNext = NULL,
+        .pQueueFamilyIndices   = p->qfs,
+        .queueFamilyIndexCount = p->num_qfs,
+        .sharingMode           = p->num_qfs > 1 ? VK_SHARING_MODE_CONCURRENT :
+                                                  VK_SHARING_MODE_EXCLUSIVE,
+    };
     VkPhysicalDeviceExternalImageFormatInfo enext = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
         .handleType = exp,
+        .pNext = has_mods ? &phy_dev_mod_info : NULL,
     };
     VkPhysicalDeviceImageFormatInfo2 pinfo = {
         .sType  = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
@@ -2058,11 +2164,18 @@ static void try_export_flags(AVHWFramesContext *hwfc,
         .flags  = VK_IMAGE_CREATE_ALIAS_BIT,
     };
 
-    ret = vk->GetPhysicalDeviceImageFormatProperties2(dev_hwctx->phys_dev,
-                                                      &pinfo, &props);
-    if (ret == VK_SUCCESS) {
-        *iexp |= exp;
-        *comp_handle_types |= eprops.externalMemoryProperties.compatibleHandleTypes;
+    nb_mods = has_mods ? drm_mod_info->drmFormatModifierCount : 1;
+    for (int i = 0; i < nb_mods; i++) {
+        if (has_mods)
+            phy_dev_mod_info.drmFormatModifier = drm_mod_info->pDrmFormatModifiers[i];
+
+        ret = vk->GetPhysicalDeviceImageFormatProperties2(dev_hwctx->phys_dev,
+                                                        &pinfo, &props);
+
+        if (ret == VK_SUCCESS) {
+            *iexp |= exp;
+            *comp_handle_types |= eprops.externalMemoryProperties.compatibleHandleTypes;
+        }
     }
 }
 
@@ -2133,6 +2246,12 @@ static void vulkan_frames_uninit(AVHWFramesContext *hwfc)
 {
     VulkanFramesPriv *fp = hwfc->internal->priv;
 
+    if (fp->modifier_info) {
+        if (fp->modifier_info->pDrmFormatModifiers)
+            av_freep(&fp->modifier_info->pDrmFormatModifiers);
+        av_freep(&fp->modifier_info);
+    }
+
     free_exec_ctx(hwfc, &fp->conv_ctx);
     free_exec_ctx(hwfc, &fp->upload_ctx);
     free_exec_ctx(hwfc, &fp->download_ctx);
@@ -2146,13 +2265,109 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
     VulkanFramesPriv *fp = hwfc->internal->priv;
     AVVulkanDeviceContext *dev_hwctx = hwfc->device_ctx->hwctx;
     VulkanDevicePriv *p = hwfc->device_ctx->internal->priv;
+    const VkImageDrmFormatModifierListCreateInfoEXT *modifier_info;
+    const int has_modifiers = !!(p->extensions & FF_VK_EXT_DRM_MODIFIER_FLAGS);
 
-    /* Default pool flags */
-    hwctx->tiling = hwctx->tiling ? hwctx->tiling : p->use_linear_images ?
-                    VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
+    /* Default tiling flags */
+    hwctx->tiling = hwctx->tiling ? hwctx->tiling :
+                    has_modifiers ? VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT :
+                    p->use_linear_images ? VK_IMAGE_TILING_LINEAR :
+                    VK_IMAGE_TILING_OPTIMAL;
 
     if (!hwctx->usage)
         hwctx->usage = FF_VK_DEFAULT_USAGE_FLAGS;
+
+    if (!(hwctx->flags & AV_VK_FRAME_FLAG_NONE)) {
+        if (p->contiguous_planes == 1 ||
+           ((p->contiguous_planes == -1) && p->dev_is_intel))
+           hwctx->flags |= AV_VK_FRAME_FLAG_CONTIGUOUS_MEMORY;
+    }
+
+    modifier_info = vk_find_struct(hwctx->create_pnext,
+                                   VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT);
+
+    /* Get the supported modifiers if the user has not given any. */
+    if (has_modifiers && !modifier_info) {
+        const VkFormat *fmt = av_vkfmt_from_pixfmt(hwfc->sw_format);
+        VkImageDrmFormatModifierListCreateInfoEXT *modifier_info;
+        FFVulkanFunctions *vk = &p->vkfn;
+        VkDrmFormatModifierPropertiesEXT *mod_props;
+        uint64_t *modifiers;
+        int modifier_count = 0;
+
+        VkDrmFormatModifierPropertiesListEXT mod_props_list = {
+            .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
+            .pNext = NULL,
+            .drmFormatModifierCount = 0,
+            .pDrmFormatModifierProperties = NULL,
+        };
+        VkFormatProperties2 prop = {
+            .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2,
+            .pNext = &mod_props_list,
+        };
+
+        /* Get all supported modifiers */
+        vk->GetPhysicalDeviceFormatProperties2(dev_hwctx->phys_dev, fmt[0], &prop);
+
+        if (!mod_props_list.drmFormatModifierCount) {
+            av_log(hwfc, AV_LOG_ERROR, "There are no supported modifiers for the given sw_format\n");
+            return AVERROR(EINVAL);
+        }
+
+        /* Createa structure to hold the modifier list info */
+        modifier_info = av_mallocz(sizeof(*modifier_info));
+        if (!modifier_info)
+            return AVERROR(ENOMEM);
+
+        modifier_info->pNext = NULL;
+        modifier_info->sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT;
+
+        /* Add structure to the image creation pNext chain */
+        if (!hwctx->create_pnext)
+            hwctx->create_pnext = modifier_info;
+        else
+            vk_link_struct(hwctx->create_pnext, (void *)modifier_info);
+
+        /* Backup the allocated struct to be freed later */
+        fp->modifier_info = modifier_info;
+
+        /* Allocate list of modifiers */
+        modifiers = av_mallocz(mod_props_list.drmFormatModifierCount *
+                               sizeof(*modifiers));
+        if (!modifiers)
+            return AVERROR(ENOMEM);
+
+        modifier_info->pDrmFormatModifiers = modifiers;
+
+        /* Allocate a temporary list to hold all modifiers supported */
+        mod_props = av_mallocz(mod_props_list.drmFormatModifierCount *
+                               sizeof(*mod_props));
+        if (!mod_props)
+            return AVERROR(ENOMEM);
+
+        mod_props_list.pDrmFormatModifierProperties = mod_props;
+
+        /* Finally get all modifiers from the device */
+        vk->GetPhysicalDeviceFormatProperties2(dev_hwctx->phys_dev, fmt[0], &prop);
+
+        /* Reject any modifiers that don't match our requirements */
+        for (int i = 0; i < mod_props_list.drmFormatModifierCount; i++) {
+            if (!(mod_props[i].drmFormatModifierTilingFeatures & hwctx->usage))
+                continue;
+
+            modifiers[modifier_count++] = mod_props[i].drmFormatModifier;
+        }
+
+        if (!modifier_count) {
+            av_log(hwfc, AV_LOG_ERROR, "None of the given modifiers supports"
+                                       " the usage flags!\n");
+            av_freep(&mod_props);
+            return AVERROR(EINVAL);
+        }
+
+        modifier_info->drmFormatModifierCount = modifier_count;
+        av_freep(&mod_props);
+    }
 
     err = create_exec_ctx(hwfc, &fp->conv_ctx,
                           dev_hwctx->queue_family_comp_index,
@@ -2264,9 +2479,10 @@ static int vulkan_map_frame_to_mem(AVHWFramesContext *hwfc, AVFrame *dst,
                                    const AVFrame *src, int flags)
 {
     VkResult ret;
-    int err, mapped_mem_count = 0;
+    int err, mapped_mem_count = 0, mem_planes = 0;
     AVVkFrame *f = (AVVkFrame *)src->data[0];
     AVVulkanDeviceContext *hwctx = hwfc->device_ctx->hwctx;
+    AVVulkanFramesContext *hwfctx = hwfc->hwctx;
     const int planes = av_pix_fmt_count_planes(hwfc->sw_format);
     VulkanDevicePriv *p = hwfc->device_ctx->internal->priv;
     FFVulkanFunctions *vk = &p->vkfn;
@@ -2293,7 +2509,8 @@ static int vulkan_map_frame_to_mem(AVHWFramesContext *hwfc, AVFrame *dst,
     dst->width  = src->width;
     dst->height = src->height;
 
-    for (int i = 0; i < planes; i++) {
+    mem_planes = hwfctx->flags & AV_VK_FRAME_FLAG_CONTIGUOUS_MEMORY ? 1 : planes;
+    for (int i = 0; i < mem_planes; i++) {
         ret = vk->MapMemory(hwctx->act_dev, f->mem[i], 0,
                             VK_WHOLE_SIZE, 0, (void **)&dst->data[i]);
         if (ret != VK_SUCCESS) {
@@ -2303,6 +2520,11 @@ static int vulkan_map_frame_to_mem(AVHWFramesContext *hwfc, AVFrame *dst,
             goto fail;
         }
         mapped_mem_count++;
+    }
+
+    if (hwfctx->flags & AV_VK_FRAME_FLAG_CONTIGUOUS_MEMORY) {
+        for (int i = 0; i < planes; i++)
+            dst->data[i] = dst->data[0] + f->offset[i];
     }
 
     /* Check if the memory contents matter */
@@ -3074,9 +3296,15 @@ static int vulkan_map_to_drm(AVHWFramesContext *hwfc, AVFrame *dst,
     FFVulkanFunctions *vk = &p->vkfn;
     VulkanFramesPriv *fp = hwfc->internal->priv;
     AVVulkanDeviceContext *hwctx = hwfc->device_ctx->hwctx;
+    AVVulkanFramesContext *hwfctx = hwfc->hwctx;
     const int planes = av_pix_fmt_count_planes(hwfc->sw_format);
     VkImageDrmFormatModifierPropertiesEXT drm_mod = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT,
+    };
+    VkSemaphoreWaitInfo wait_info = {
+        .sType          = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+        .flags          = 0x0,
+        .semaphoreCount = planes,
     };
 
     AVDRMFrameDescriptor *drm_desc = av_mallocz(sizeof(*drm_desc));
@@ -3086,6 +3314,12 @@ static int vulkan_map_to_drm(AVHWFramesContext *hwfc, AVFrame *dst,
     err = prepare_frame(hwfc, &fp->conv_ctx, f, PREP_MODE_EXTERNAL_EXPORT);
     if (err < 0)
         goto end;
+
+    /* Wait for the operation to finish so we can cleanly export it. */
+    wait_info.pSemaphores = f->sem;
+    wait_info.pValues     = f->sem_value;
+
+    vk->WaitSemaphores(hwctx->act_dev, &wait_info, UINT64_MAX);
 
     err = ff_hwframe_map_create(src->hw_frames_ctx, dst, src, &vulkan_unmap_to_drm, drm_desc);
     if (err < 0)
@@ -3142,8 +3376,11 @@ static int vulkan_map_to_drm(AVHWFramesContext *hwfc, AVFrame *dst,
             continue;
 
         vk->GetImageSubresourceLayout(hwctx->act_dev, f->img[i], &sub, &layout);
-        drm_desc->layers[i].planes[0].offset       = layout.offset;
-        drm_desc->layers[i].planes[0].pitch        = layout.rowPitch;
+        drm_desc->layers[i].planes[0].offset = layout.offset;
+        drm_desc->layers[i].planes[0].pitch  = layout.rowPitch;
+
+        if (hwfctx->flags & AV_VK_FRAME_FLAG_CONTIGUOUS_MEMORY)
+            drm_desc->layers[i].planes[0].offset += f->offset[i];
     }
 
     dst->width   = src->width;

@@ -484,6 +484,17 @@ void ff_flush_packet_queue(AVFormatContext *s);
  */
 int ff_mkdir_p(const char *path);
 
+/**
+ * Write hexadecimal string corresponding to given binary data. The string
+ * is zero-terminated.
+ *
+ * @param buf       the output string is written here;
+ *                  needs to be at least 2 * size + 1 bytes long.
+ * @param src       the input data to be transformed.
+ * @param size      the size (in byte) of src.
+ * @param lowercase determines whether to use the range [0-9a-f] or [0-9A-F].
+ * @return buf.
+ */
 char *ff_data_to_hex(char *buf, const uint8_t *src, int size, int lowercase);
 
 /**
@@ -545,10 +556,11 @@ uint64_t ff_parse_ntp_time(uint64_t ntp_ts);
  * @param ttl the time to live of the stream, 0 if not multicast
  * @param fmt the AVFormatContext, which might contain options modifying
  *            the generated SDP
+ * @return 0 on success, a negative error code on failure
  */
-void ff_sdp_write_media(char *buff, int size, AVStream *st, int idx,
-                        const char *dest_addr, const char *dest_type,
-                        int port, int ttl, AVFormatContext *fmt);
+int ff_sdp_write_media(char *buff, int size, const AVStream *st, int idx,
+                       const char *dest_addr, const char *dest_type,
+                       int port, int ttl, AVFormatContext *fmt);
 
 /**
  * Write a packet to another muxer than the one the user originally
@@ -619,7 +631,7 @@ void ff_parse_key_value(const char *str, ff_parse_key_val_cb callback_get_buf,
  * Find stream index based on format-specific stream ID
  * @return stream index, or < 0 on error
  */
-int ff_find_stream_index(AVFormatContext *s, int id);
+int ff_find_stream_index(const AVFormatContext *s, int id);
 
 /**
  * Internal version of av_index_search_timestamp
@@ -905,8 +917,16 @@ int ff_format_output_open(AVFormatContext *s, const char *url, AVDictionary **op
 /*
  * A wrapper around AVFormatContext.io_close that should be used
  * instead of calling the pointer directly.
+ *
+ * @param s AVFormatContext
+ * @param *pb the AVIOContext to be closed and freed. Can be NULL.
+ * @return >=0 on success, negative AVERROR in case of failure
  */
-void ff_format_io_close(AVFormatContext *s, AVIOContext **pb);
+int ff_format_io_close(AVFormatContext *s, AVIOContext **pb);
+
+/* Default io_close callback, not to be used directly, use ff_format_io_close
+ * instead. */
+void ff_format_io_close_default(AVFormatContext *s, AVIOContext *pb);
 
 /**
  * Utility function to check if the file uses http or https protocol

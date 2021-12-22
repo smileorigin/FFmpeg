@@ -198,7 +198,6 @@ typedef struct MpegEncContext {
     int *lambda_table;
     int adaptive_quant;         ///< use adaptive quantization
     int dquant;                 ///< qscale difference to prev qscale
-    int closed_gop;             ///< MPEG1/2 GOP is closed
     int pict_type;              ///< AV_PICTURE_TYPE_I, AV_PICTURE_TYPE_P, AV_PICTURE_TYPE_B, ...
     int vbv_delay;
     int last_pict_type; //FIXME removes
@@ -233,8 +232,8 @@ typedef struct MpegEncContext {
     int16_t (*b_bidir_forw_mv_table_base)[2];
     int16_t (*b_bidir_back_mv_table_base)[2];
     int16_t (*b_direct_mv_table_base)[2];
-    int16_t (*p_field_mv_table_base[2][2])[2];
-    int16_t (*b_field_mv_table_base[2][2][2])[2];
+    int16_t (*p_field_mv_table_base)[2];
+    int16_t (*b_field_mv_table_base)[2];
     int16_t (*p_mv_table)[2];            ///< MV table (1MV per MB) P-frame encoding
     int16_t (*b_forw_mv_table)[2];       ///< MV table (1MV per MB) forward mode B-frame encoding
     int16_t (*b_back_mv_table)[2];       ///< MV table (1MV per MB) backward mode B-frame encoding
@@ -243,8 +242,8 @@ typedef struct MpegEncContext {
     int16_t (*b_direct_mv_table)[2];     ///< MV table (1MV per MB) direct mode B-frame encoding
     int16_t (*p_field_mv_table[2][2])[2];   ///< MV table (2MV per MB) interlaced P-frame encoding
     int16_t (*b_field_mv_table[2][2][2])[2];///< MV table (4MV per MB) interlaced B-frame encoding
-    uint8_t (*p_field_select_table[2]);
-    uint8_t (*b_field_select_table[2][2]);
+    uint8_t (*p_field_select_table[2]);  ///< Only the first element is allocated
+    uint8_t (*b_field_select_table[2][2]); ///< Only the first element is allocated
     int motion_est;                      ///< ME algorithm
     int me_penalty_compensation;
     int me_pre;                          ///< prepass for motion estimation

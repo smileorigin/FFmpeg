@@ -47,12 +47,14 @@
 
 #include "libswresample/swresample.h"
 
-#define VSYNC_AUTO       -1
-#define VSYNC_PASSTHROUGH 0
-#define VSYNC_CFR         1
-#define VSYNC_VFR         2
-#define VSYNC_VSCFR       0xfe
-#define VSYNC_DROP        0xff
+enum VideoSyncMethod {
+    VSYNC_AUTO = -1,
+    VSYNC_PASSTHROUGH,
+    VSYNC_CFR,
+    VSYNC_VFR,
+    VSYNC_VSCFR,
+    VSYNC_DROP,
+};
 
 #define MAX_STREAMS 1024    /* arbitrary sanity check value */
 
@@ -228,6 +230,8 @@ typedef struct OptionsContext {
     int        nb_enc_time_bases;
     SpecifierOpt *autoscale;
     int        nb_autoscale;
+    SpecifierOpt *bits_per_raw_sample;
+    int        nb_bits_per_raw_sample;
 } OptionsContext;
 
 typedef struct InputFilter {
@@ -285,6 +289,9 @@ typedef struct FilterGraph {
 
     AVFilterGraph *graph;
     int reconfiguration;
+    // true when the filtergraph contains only meta filters
+    // that do not modify the frame data
+    int is_meta;
 
     InputFilter   **inputs;
     int          nb_inputs;
@@ -478,11 +485,13 @@ typedef struct OutputStream {
     /* video only */
     AVRational frame_rate;
     AVRational max_frame_rate;
+    enum VideoSyncMethod vsync_method;
     int is_cfr;
     int force_fps;
     int top_field_first;
     int rotate_overridden;
     int autoscale;
+    int bits_per_raw_sample;
     double rotate_override_value;
 
     AVRational frame_aspect_ratio;
@@ -599,7 +608,7 @@ extern float dts_error_threshold;
 
 extern int audio_volume;
 extern int audio_sync_method;
-extern int video_sync_method;
+extern enum VideoSyncMethod video_sync_method;
 extern float frame_drop_threshold;
 extern int do_benchmark;
 extern int do_benchmark_all;

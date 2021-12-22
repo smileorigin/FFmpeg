@@ -309,6 +309,7 @@ External library support:
                            if openssl, gnutls or libtls is not used [no]
   --enable-mediacodec      enable Android MediaCodec support [no]
   --enable-mediafoundation enable encoding via MediaFoundation [auto]
+  --disable-metal          disable Apple Metal framework [autodetect]
   --enable-libmysofa       enable libmysofa, needed for sofalizer filter [no]
   --enable-openal          enable OpenAL 1.1 capture support [no]
   --enable-opencl          enable OpenCL processing [no]
@@ -323,7 +324,7 @@ External library support:
   --disable-securetransport disable Secure Transport, needed for TLS support
                            on OSX if openssl and gnutls are not used [autodetect]
   --enable-vapoursynth     enable VapourSynth demuxer [no]
-  --enable-vulkan          enable Vulkan code [no]
+  --disable-vulkan         disable Vulkan code [autodetect]
   --disable-xlib           disable xlib [autodetect]
   --disable-zlib           disable zlib [autodetect]
 
@@ -382,6 +383,8 @@ Toolchain options:
   --dep-cc=DEPCC           use dependency generator DEPCC [$cc_default]
   --nvcc=NVCC              use Nvidia CUDA compiler NVCC or clang [$nvcc_default]
   --ld=LD                  use linker LD [$ld_default]
+  --metalcc=METALCC        use metal compiler METALCC [$metalcc_default]
+  --metallib=METALLIB      use metal linker METALLIB [$metallib_default]
   --pkg-config=PKGCONFIG   use pkg-config tool PKGCONFIG [$pkg_config_default]
   --pkg-config-flags=FLAGS pass additional flags to pkgconf []
   --ranlib=RANLIB          use ranlib RANLIB [$ranlib_default]
@@ -452,7 +455,9 @@ Optimization options (experts only):
   --disable-mipsdspr2      disable MIPS DSP ASE R2 optimizations
   --disable-msa            disable MSA optimizations
   --disable-mipsfpu        disable floating point MIPS optimizations
-  --disable-mmi            disable Loongson SIMD optimizations
+  --disable-mmi            disable Loongson MMI optimizations
+  --disable-lsx            disable Loongson LSX optimizations
+  --disable-lasx           disable Loongson LASX optimizations
   --disable-fast-unaligned consider unaligned accesses slow
 
 Developer options (useful when working on FFmpeg itself):
@@ -1753,6 +1758,7 @@ EXTERNAL_AUTODETECT_LIBRARY_LIST="
     libxcb_xfixes
     lzma
     mediafoundation
+    metal
     schannel
     sdl2
     securetransport
@@ -1891,6 +1897,7 @@ HWACCEL_AUTODETECT_LIBRARY_LIST="
     vaapi
     vdpau
     videotoolbox
+    vulkan
     v4l2_m2m
     xvmc
 "
@@ -1913,7 +1920,6 @@ HWACCEL_LIBRARY_LIST="
     mmal
     omx
     opencl
-    vulkan
 "
 
 DOCUMENT_LIST="
@@ -2032,6 +2038,9 @@ ARCH_LIST="
     avr32_uc
     bfin
     ia64
+    loongarch
+    loongarch32
+    loongarch64
     m68k
     mips
     mips64
@@ -2078,6 +2087,8 @@ ARCH_EXT_LIST_LOONGSON="
     loongson2
     loongson3
     mmi
+    lsx
+    lasx
 "
 
 ARCH_EXT_LIST_X86_SIMD="
@@ -2557,6 +2568,8 @@ CMDLINE_SET="
     ln_s
     logfile
     malloc_prefix
+    metalcc
+    metallib
     nm
     optflags
     nvcc
@@ -2614,6 +2627,10 @@ power8_deps="vsx"
 
 loongson2_deps="mips"
 loongson3_deps="mips"
+mmi_deps_any="loongson2 loongson3"
+lsx_deps="loongarch"
+lasx_deps="lsx"
+
 mips32r2_deps="mips"
 mips32r5_deps="mips"
 mips32r6_deps="mips"
@@ -2622,7 +2639,6 @@ mips64r6_deps="mips"
 mipsfpu_deps="mips"
 mipsdsp_deps="mips"
 mipsdspr2_deps="mips"
-mmi_deps_any="loongson2 loongson3"
 msa_deps="mipsfpu"
 
 cpunop_deps="i686"
@@ -3628,6 +3644,7 @@ fftdnoiz_filter_select="fft"
 find_rect_filter_deps="avcodec avformat gpl"
 firequalizer_filter_deps="avcodec"
 firequalizer_filter_select="rdft"
+flip_vulkan_filter_deps="vulkan spirv_compiler"
 flite_filter_deps="libflite"
 framerate_filter_select="scene_sad"
 freezedetect_filter_select="scene_sad"
@@ -3714,6 +3731,7 @@ tonemap_vaapi_filter_deps="vaapi VAProcFilterParameterBufferHDRToneMapping"
 tonemap_opencl_filter_deps="opencl const_nan"
 transpose_opencl_filter_deps="opencl"
 transpose_vaapi_filter_deps="vaapi VAProcPipelineCaps_rotation_flags"
+transpose_vulkan_filter_deps="vulkan spirv_compiler"
 unsharp_opencl_filter_deps="opencl"
 uspp_filter_deps="gpl avcodec"
 vaguedenoiser_filter_deps="gpl"
@@ -3731,6 +3749,7 @@ vpp_qsv_filter_select="qsvvpp"
 xfade_opencl_filter_deps="opencl"
 yadif_cuda_filter_deps="ffnvcodec"
 yadif_cuda_filter_deps_any="cuda_nvcc cuda_llvm"
+yadif_videotoolbox_filter_deps="metal corevideo videotoolbox"
 
 # examples
 avio_list_dir_deps="avformat avutil"
@@ -3823,6 +3842,8 @@ host_cc_default="gcc"
 doxygen_default="doxygen"
 install="install"
 ln_s_default="ln -s -f"
+metalcc_default="xcrun metal"
+metallib_default="xcrun metallib"
 nm_default="nm -g"
 pkg_config_default=pkg-config
 ranlib_default="ranlib"
@@ -4423,7 +4444,7 @@ if enabled cuda_nvcc; then
 fi
 
 set_default arch cc cxx doxygen pkg_config ranlib strip sysinclude \
-    target_exec x86asmexe
+    target_exec x86asmexe metalcc metallib
 enabled cross_compile || host_cc_default=$cc
 set_default host_cc
 
@@ -4959,6 +4980,9 @@ case "$arch" in
     arm*|iPad*|iPhone*)
         arch="arm"
     ;;
+    loongarch*)
+        arch="loongarch"
+    ;;
     mips*|IP*)
         case "$arch" in
         *el)
@@ -5106,6 +5130,18 @@ elif enabled bfin; then
 
     cpuflags="-mcpu=$cpu"
 
+elif enabled loongarch; then
+
+    enable local_aligned
+    enable simd_align_32
+    enable fast_64bit
+    enable fast_clz
+    enable fast_unaligned
+    case $cpu in
+        la464)
+            cpuflags="-march=$cpu"
+        ;;
+    esac
 elif enabled mips; then
 
     if [ "$cpu" != "generic" ]; then
@@ -5360,6 +5396,11 @@ check_64bit(){
 
 case "$arch" in
     aarch64|alpha|ia64)
+        enabled shared && enable_weak pic
+    ;;
+    loongarch)
+        check_64bit loongarch32 loongarch64
+        enabled loongarch64 && disable loongarch32
         enabled shared && enable_weak pic
     ;;
     mips)
@@ -6109,6 +6150,9 @@ EOF
         ;;
     esac
 
+elif enabled loongarch; then
+    enabled lsx && check_inline_asm lsx '"vadd.b $vr0, $vr1, $vr2"' '-mlsx' && append LSXFLAGS '-mlsx'
+    enabled lasx && check_inline_asm lasx '"xvadd.b $xr0, $xr1, $xr2"' '-mlasx' && append LASXFLAGS '-mlasx'
 fi
 
 check_cc intrinsics_neon arm_neon.h "int16x8_t test = vdupq_n_s16(0)"
@@ -6285,6 +6329,7 @@ enabled appkit       && check_apple_framework AppKit
 enabled audiotoolbox && check_apple_framework AudioToolbox
 enabled avfoundation && check_apple_framework AVFoundation
 enabled coreimage    && check_apple_framework CoreImage
+enabled metal        && check_apple_framework Metal
 enabled videotoolbox && check_apple_framework VideoToolbox
 
 check_apple_framework CoreFoundation
@@ -6457,7 +6502,7 @@ enabled libaribb24        && { check_pkg_config libaribb24 "aribb24 > 1.0.3" "ar
                                die "ERROR: libaribb24 requires version higher than 1.0.3 or --enable-gpl."; }
 enabled lv2               && require_pkg_config lv2 lilv-0 "lilv/lilv.h" lilv_world_new
 enabled libiec61883       && require libiec61883 libiec61883/iec61883.h iec61883_cmp_connect -lraw1394 -lavc1394 -lrom1394 -liec61883
-enabled libass            && require_pkg_config libass libass ass/ass.h ass_library_init
+enabled libass            && require_pkg_config libass "libass >= 0.11.0" ass/ass.h ass_library_init
 enabled libbluray         && require_pkg_config libbluray libbluray libbluray/bluray.h bd_open
 enabled libbs2b           && require_pkg_config libbs2b libbs2b bs2b.h bs2b_open
 enabled libcelt           && require libcelt celt/celt.h celt_decode -lcelt0 &&
@@ -6531,7 +6576,7 @@ enabled libopus           && {
         require_pkg_config libopus opus opus_multistream.h opus_multistream_surround_encoder_create
     }
 }
-enabled libplacebo        && require_pkg_config libplacebo "libplacebo >= 4.173.0" libplacebo/vulkan.h pl_vulkan_create
+enabled libplacebo        && require_pkg_config libplacebo "libplacebo >= 4.184.0" libplacebo/vulkan.h pl_vulkan_create
 enabled libpulse          && require_pkg_config libpulse libpulse pulse/pulseaudio.h pa_context_new
 enabled librabbitmq       && require_pkg_config librabbitmq "librabbitmq >= 0.7.1" amqp.h amqp_new_connection
 enabled librav1e          && require_pkg_config librav1e "rav1e >= 0.4.0" rav1e.h rav1e_context_new
@@ -6870,7 +6915,7 @@ enabled crystalhd && check_lib crystalhd "stdint.h libcrystalhd/libcrystalhd_if.
 
 if enabled vulkan; then
     check_pkg_config_header_only vulkan "vulkan >= 1.2.189" "vulkan/vulkan.h" "defined VK_VERSION_1_2" ||
-        require_cpp_condition vulkan "vulkan/vulkan.h" "defined VK_VERSION_1_2"
+        check_cpp_condition vulkan "vulkan/vulkan.h" "defined(VK_VERSION_1_3) || (defined(VK_VERSION_1_2) && VK_HEADER_VERSION >= 189)"
 fi
 
 if enabled x86; then
@@ -7459,6 +7504,10 @@ if enabled ppc; then
     echo "PPC 4xx optimizations     ${ppc4xx-no}"
     echo "dcbzl available           ${dcbzl-no}"
 fi
+if enabled loongarch; then
+    echo "LSX enabled               ${lsx-no}"
+    echo "LASX enabled              ${lasx-no}"
+fi
 echo "debug symbols             ${debug-no}"
 echo "strip symbols             ${stripping-no}"
 echo "optimize for size         ${small-no}"
@@ -7581,6 +7630,8 @@ ARFLAGS=$arflags
 AR_O=$ar_o
 AR_CMD=$ar
 NM_CMD=$nm
+METALCC=$metalcc
+METALLIB=$metallib
 RANLIB=$ranlib
 STRIP=$strip
 STRIPTYPE=$striptype
@@ -7620,6 +7671,8 @@ ASMSTRIPFLAGS=$ASMSTRIPFLAGS
 X86ASMFLAGS=$X86ASMFLAGS
 MSAFLAGS=$MSAFLAGS
 MMIFLAGS=$MMIFLAGS
+LSXFLAGS=$LSXFLAGS
+LASXFLAGS=$LASXFLAGS
 BUILDSUF=$build_suffix
 PROGSSUF=$progs_suffix
 FULLNAME=$FULLNAME

@@ -34,6 +34,7 @@
 #include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
 #include "libavutil/avutil.h"
+#include "libavutil/bprint.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/fifo.h"
@@ -96,6 +97,7 @@ static const char *const opt_name_discard[]                   = {"discard", NULL
 static const char *const opt_name_disposition[]               = {"disposition", NULL};
 static const char *const opt_name_time_bases[]                = {"time_base", NULL};
 static const char *const opt_name_enc_time_bases[]            = {"enc_time_base", NULL};
+static const char *const opt_name_bits_per_raw_sample[]       = {"bits_per_raw_sample", NULL};
 
 #define WARN_MULTIPLE_OPT_USAGE(name, type, so, st)\
 {\
@@ -145,7 +147,7 @@ float dts_error_threshold   = 3600*30;
 
 int audio_volume      = 256;
 int audio_sync_method = 0;
-int video_sync_method = VSYNC_AUTO;
+enum VideoSyncMethod video_sync_method = VSYNC_AUTO;
 float frame_drop_threshold = 0;
 int do_benchmark      = 0;
 int do_benchmark_all  = 0;
@@ -160,7 +162,6 @@ int abort_on_flags    = 0;
 int print_stats       = -1;
 int qp_hist           = 0;
 int stdin_interaction = 1;
-int frame_bits_per_raw_sample = 0;
 float max_error_rate  = 2.0/3;
 char *filter_nbthreads;
 int filter_complex_nbthreads = 0;
@@ -1265,11 +1266,7 @@ static int open_input_file(OptionsContext *o, const char *filename)
     /* dump the file content */
     av_dump_format(ic, nb_input_files, filename, 0);
 
-    GROW_ARRAY(input_files, nb_input_files);
-    f = av_mallocz(sizeof(*f));
-    if (!f)
-        exit_program(1);
-    input_files[nb_input_files - 1] = f;
+    f = ALLOC_ARRAY_ELEM(input_files, nb_input_files);
 
     f->ctx        = ic;
     f->ist_index  = nb_input_streams - ic->nb_streams;
@@ -1355,23 +1352,18 @@ static int open_input_file(OptionsContext *o, const char *filename)
     return 0;
 }
 
-static uint8_t *get_line(AVIOContext *s)
+static char *get_line(AVIOContext *s, AVBPrint *bprint)
 {
-    AVIOContext *line;
-    uint8_t *buf;
     char c;
 
-    if (avio_open_dyn_buf(&line) < 0) {
+    while ((c = avio_r8(s)) && c != '\n')
+        av_bprint_chars(bprint, c, 1);
+
+    if (!av_bprint_is_complete(bprint)) {
         av_log(NULL, AV_LOG_FATAL, "Could not alloc buffer for reading preset.\n");
         exit_program(1);
     }
-
-    while ((c = avio_r8(s)) && c != '\n')
-        avio_w8(line, c);
-    avio_w8(line, 0);
-    avio_close_dyn_buf(line, &buf);
-
-    return buf;
+    return bprint->str;
 }
 
 static int get_preset_file_2(const char *preset_name, const char *codec_name, AVIOContext **s)
@@ -1502,20 +1494,21 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
         ost->autoscale = 1;
         MATCH_PER_STREAM_OPT(autoscale, i, ost->autoscale, oc, st);
         if (preset && (!(ret = get_preset_file_2(preset, ost->enc->name, &s)))) {
+            AVBPrint bprint;
+            av_bprint_init(&bprint, 0, AV_BPRINT_SIZE_UNLIMITED);
             do  {
-                buf = get_line(s);
-                if (!buf[0] || buf[0] == '#') {
-                    av_free(buf);
+                av_bprint_clear(&bprint);
+                buf = get_line(s, &bprint);
+                if (!buf[0] || buf[0] == '#')
                     continue;
-                }
                 if (!(arg = strchr(buf, '='))) {
                     av_log(NULL, AV_LOG_FATAL, "Invalid line found in the preset file.\n");
                     exit_program(1);
                 }
                 *arg++ = 0;
                 av_dict_set(&ost->encoder_opts, buf, arg, AV_DICT_DONT_OVERWRITE);
-                av_free(buf);
             } while (!s->eof_reached);
+            av_bprint_finalize(&bprint, NULL);
             avio_closep(&s);
         }
         if (ret) {
@@ -1604,6 +1597,9 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
     ost->muxing_queue_data_threshold = 50*1024*1024;
     MATCH_PER_STREAM_OPT(muxing_queue_data_threshold, i, ost->muxing_queue_data_threshold, oc, st);
 
+    MATCH_PER_STREAM_OPT(bits_per_raw_sample, i, ost->bits_per_raw_sample,
+                         oc, st);
+
     if (oc->oformat->flags & AVFMT_GLOBALHEADER)
         ost->enc_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
@@ -1646,29 +1642,26 @@ static void parse_matrix_coeffs(uint16_t *dest, const char *str)
 }
 
 /* read file contents into a string */
-static uint8_t *read_file(const char *filename)
+static char *read_file(const char *filename)
 {
     AVIOContext *pb      = NULL;
-    AVIOContext *dyn_buf = NULL;
     int ret = avio_open(&pb, filename, AVIO_FLAG_READ);
-    uint8_t buf[1024], *str;
+    AVBPrint bprint;
+    char *str;
 
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Error opening file %s.\n", filename);
         return NULL;
     }
 
-    ret = avio_open_dyn_buf(&dyn_buf);
+    av_bprint_init(&bprint, 0, AV_BPRINT_SIZE_UNLIMITED);
+    ret = avio_read_to_bprint(pb, &bprint, SIZE_MAX);
+    avio_closep(&pb);
     if (ret < 0) {
-        avio_closep(&pb);
+        av_bprint_finalize(&bprint, NULL);
         return NULL;
     }
-    while ((ret = avio_read(pb, buf, sizeof(buf))) > 0)
-        avio_write(dyn_buf, buf, ret);
-    avio_w8(dyn_buf, 0);
-    avio_closep(&pb);
-
-    ret = avio_close_dyn_buf(dyn_buf, &str);
+    ret = av_bprint_finalize(&bprint, &str);
     if (ret < 0)
         return NULL;
     return str;
@@ -1738,7 +1731,7 @@ static OutputStream *new_video_stream(OptionsContext *o, AVFormatContext *oc, in
 
     if ((frame_rate || max_frame_rate) &&
         video_sync_method == VSYNC_PASSTHROUGH)
-        av_log(NULL, AV_LOG_ERROR, "Using -vsync 0 and -r/-fpsmax can produce invalid output files\n");
+        av_log(NULL, AV_LOG_ERROR, "Using -vsync passthrough and -r/-fpsmax can produce invalid output files\n");
 
     MATCH_PER_STREAM_OPT(frame_aspect_ratios, str, frame_aspect_ratio, oc, st);
     if (frame_aspect_ratio) {
@@ -1769,7 +1762,6 @@ static OutputStream *new_video_stream(OptionsContext *o, AVFormatContext *oc, in
             exit_program(1);
         }
 
-        video_enc->bits_per_raw_sample = frame_bits_per_raw_sample;
         MATCH_PER_STREAM_OPT(frame_pix_fmts, str, frame_pix_fmt, oc, st);
         if (frame_pix_fmt && *frame_pix_fmt == '+') {
             ost->keep_pix_fmt = 1;
@@ -1903,9 +1895,37 @@ static OutputStream *new_video_stream(OptionsContext *o, AVFormatContext *oc, in
         ost->top_field_first = -1;
         MATCH_PER_STREAM_OPT(top_field_first, i, ost->top_field_first, oc, st);
 
+        ost->vsync_method = video_sync_method;
+        if (ost->vsync_method == VSYNC_AUTO) {
+            if (!strcmp(oc->oformat->name, "avi")) {
+                ost->vsync_method = VSYNC_VFR;
+            } else {
+                ost->vsync_method = (oc->oformat->flags & AVFMT_VARIABLE_FPS)       ?
+                                     ((oc->oformat->flags & AVFMT_NOTIMESTAMPS) ?
+                                      VSYNC_PASSTHROUGH : VSYNC_VFR)                :
+                                     VSYNC_CFR;
+            }
+
+            if (ost->source_index >= 0 && ost->vsync_method == VSYNC_CFR) {
+                const InputStream *ist = input_streams[ost->source_index];
+                const InputFile *ifile = input_files[ist->file_index];
+
+                if (ifile->nb_streams == 1 && ifile->input_ts_offset == 0)
+                    ost->vsync_method = VSYNC_VSCFR;
+            }
+
+            if (ost->vsync_method == VSYNC_CFR && copy_ts) {
+                ost->vsync_method = VSYNC_VSCFR;
+            }
+        }
+        ost->is_cfr = (ost->vsync_method == VSYNC_CFR || ost->vsync_method == VSYNC_VSCFR);
 
         ost->avfilter = get_ost_filters(o, oc, ost);
         if (!ost->avfilter)
+            exit_program(1);
+
+        ost->last_frame = av_frame_alloc();
+        if (!ost->last_frame)
             exit_program(1);
     } else {
         MATCH_PER_STREAM_OPT(copy_initial_nonkeyframes, i, ost->copy_initial_nonkeyframes, oc ,st);
@@ -2261,11 +2281,7 @@ static int open_output_file(OptionsContext *o, const char *filename)
         }
     }
 
-    GROW_ARRAY(output_files, nb_output_files);
-    of = av_mallocz(sizeof(*of));
-    if (!of)
-        exit_program(1);
-    output_files[nb_output_files - 1] = of;
+    of = ALLOC_ARRAY_ELEM(output_files, nb_output_files);
 
     of->ost_index      = nb_output_streams;
     of->recording_time = o->recording_time;
@@ -3199,8 +3215,11 @@ static int opt_vsync(void *optctx, const char *opt, const char *arg)
     else if (!av_strcasecmp(arg, "passthrough")) video_sync_method = VSYNC_PASSTHROUGH;
     else if (!av_strcasecmp(arg, "drop"))        video_sync_method = VSYNC_DROP;
 
-    if (video_sync_method == VSYNC_AUTO)
+    if (video_sync_method == VSYNC_AUTO) {
         video_sync_method = parse_number_or_die("vsync", arg, OPT_INT, VSYNC_AUTO, VSYNC_VFR);
+        av_log(NULL, AV_LOG_WARNING, "Passing a number to -vsync is deprecated,"
+               " use a string argument as described in the manual.\n");
+    }
     return 0;
 }
 
@@ -3262,12 +3281,12 @@ static int opt_audio_qscale(void *optctx, const char *opt, const char *arg)
 
 static int opt_filter_complex(void *optctx, const char *opt, const char *arg)
 {
-    GROW_ARRAY(filtergraphs, nb_filtergraphs);
-    if (!(filtergraphs[nb_filtergraphs - 1] = av_mallocz(sizeof(*filtergraphs[0]))))
-        return AVERROR(ENOMEM);
-    filtergraphs[nb_filtergraphs - 1]->index      = nb_filtergraphs - 1;
-    filtergraphs[nb_filtergraphs - 1]->graph_desc = av_strdup(arg);
-    if (!filtergraphs[nb_filtergraphs - 1]->graph_desc)
+    FilterGraph *fg;
+    ALLOC_ARRAY_ELEM(filtergraphs, nb_filtergraphs);
+    fg = filtergraphs[nb_filtergraphs - 1];
+    fg->index      = nb_filtergraphs - 1;
+    fg->graph_desc = av_strdup(arg);
+    if (!fg->graph_desc)
         return AVERROR(ENOMEM);
 
     input_stream_potentially_available = 1;
@@ -3277,15 +3296,14 @@ static int opt_filter_complex(void *optctx, const char *opt, const char *arg)
 
 static int opt_filter_complex_script(void *optctx, const char *opt, const char *arg)
 {
-    uint8_t *graph_desc = read_file(arg);
+    FilterGraph *fg;
+    char *graph_desc = read_file(arg);
     if (!graph_desc)
         return AVERROR(EINVAL);
 
-    GROW_ARRAY(filtergraphs, nb_filtergraphs);
-    if (!(filtergraphs[nb_filtergraphs - 1] = av_mallocz(sizeof(*filtergraphs[0]))))
-        return AVERROR(ENOMEM);
-    filtergraphs[nb_filtergraphs - 1]->index      = nb_filtergraphs - 1;
-    filtergraphs[nb_filtergraphs - 1]->graph_desc = graph_desc;
+    fg = ALLOC_ARRAY_ELEM(filtergraphs, nb_filtergraphs);
+    fg->index      = nb_filtergraphs - 1;
+    fg->graph_desc = graph_desc;
 
     input_stream_potentially_available = 1;
 
@@ -3681,6 +3699,9 @@ const OptionDef options[] = {
         "set the maximum number of queued packets from the demuxer" },
     { "find_stream_info", OPT_BOOL | OPT_PERFILE | OPT_INPUT | OPT_EXPERT, { &find_stream_info },
         "read and decode the streams to fill missing information with heuristics" },
+    { "bits_per_raw_sample", OPT_INT | HAS_ARG | OPT_EXPERT | OPT_SPEC | OPT_OUTPUT,
+        { .off = OFFSET(bits_per_raw_sample) },
+        "set the number of bits per raw sample", "number" },
 
     /* video options */
     { "vframes",      OPT_VIDEO | HAS_ARG  | OPT_PERFILE | OPT_OUTPUT,           { .func_arg = opt_video_frames },
@@ -3700,8 +3721,6 @@ const OptionDef options[] = {
     { "pix_fmt",      OPT_VIDEO | HAS_ARG | OPT_EXPERT  | OPT_STRING | OPT_SPEC |
                       OPT_INPUT | OPT_OUTPUT,                                    { .off = OFFSET(frame_pix_fmts) },
         "set pixel format", "format" },
-    { "bits_per_raw_sample", OPT_VIDEO | OPT_INT | HAS_ARG,                      { &frame_bits_per_raw_sample },
-        "set the number of bits per raw sample", "number" },
     { "vn",           OPT_VIDEO | OPT_BOOL  | OPT_OFFSET | OPT_INPUT | OPT_OUTPUT,{ .off = OFFSET(video_disable) },
         "disable video" },
     { "rc_override",  OPT_VIDEO | HAS_ARG | OPT_EXPERT  | OPT_STRING | OPT_SPEC |

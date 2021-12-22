@@ -48,7 +48,6 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/time_internal.h"
 #include "libavcodec/bytestream.h"
-#include "libavcodec/dnxhddata.h"
 #include "libavcodec/dv_profile.h"
 #include "libavcodec/h264_ps.h"
 #include "libavcodec/golomb.h"
@@ -421,6 +420,7 @@ typedef struct MXFContext {
     int track_instance_count; // used to generate MXFTrack uuids
     int cbr_index;           ///< use a constant bitrate index
     uint8_t unused_tags[MXF_NUM_TAGS];  ///< local tags that we know will not be used
+    MXFStreamContext timecode_track_priv;
 } MXFContext;
 
 static void mxf_write_uuid(AVIOContext *pb, enum MXFMetadataSetType type, int value)
@@ -2196,9 +2196,9 @@ static int mxf_parse_dv_frame(AVFormatContext *s, AVStream *st, AVPacket *pkt)
 static const struct {
     UID uid;
     int frame_size;
-    int profile;
+    uint8_t profile;
     uint8_t interlaced;
-    int intra_only; // 1 or 0 when there are separate UIDs for Long GOP and Intra, -1 when Intra/LGOP detection can be ignored
+    int8_t intra_only; // 1 or 0 when there are separate UIDs for Long GOP and Intra, -1 when Intra/LGOP detection can be ignored
 } mxf_h264_codec_uls[] = {
     {{ 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0a,0x04,0x01,0x02,0x02,0x01,0x31,0x11,0x01 },      0,  66, 0, -1 }, // AVC Baseline
     {{ 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0a,0x04,0x01,0x02,0x02,0x01,0x31,0x20,0x01 },      0,  77, 0, -1 }, // AVC Main
@@ -2705,9 +2705,7 @@ static int mxf_init(AVFormatContext *s)
     mxf->timecode_track = av_mallocz(sizeof(*mxf->timecode_track));
     if (!mxf->timecode_track)
         return AVERROR(ENOMEM);
-    mxf->timecode_track->priv_data = av_mallocz(sizeof(MXFStreamContext));
-    if (!mxf->timecode_track->priv_data)
-        return AVERROR(ENOMEM);
+    mxf->timecode_track->priv_data = &mxf->timecode_track_priv;
     mxf->timecode_track->index = -1;
 
     return 0;
@@ -3080,10 +3078,7 @@ static void mxf_deinit(AVFormatContext *s)
 
     av_freep(&mxf->index_entries);
     av_freep(&mxf->body_partition_offset);
-    if (mxf->timecode_track) {
-        av_freep(&mxf->timecode_track->priv_data);
-        av_freep(&mxf->timecode_track);
-    }
+    av_freep(&mxf->timecode_track);
 }
 
 static int mxf_interleave_get_packet(AVFormatContext *s, AVPacket *out, int flush)

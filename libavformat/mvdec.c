@@ -26,6 +26,7 @@
 
 #include "libavutil/channel_layout.h"
 #include "libavutil/eval.h"
+#include "libavutil/intfloat.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/rational.h"
 
@@ -299,7 +300,10 @@ static int mv_read_header(AVFormatContext *avctx)
     if (version == 2) {
         uint64_t timestamp;
         int v;
-        avio_skip(pb, 22);
+        uint32_t bytes_per_sample;
+        AVRational fps;
+
+        avio_skip(pb, 10);
 
         /* allocate audio track first to prevent unnecessary seeking
          * (audio packet always precede video packet for a given frame) */
@@ -310,10 +314,12 @@ static int mv_read_header(AVFormatContext *avctx)
         vst = avformat_new_stream(avctx, NULL);
         if (!vst)
             return AVERROR(ENOMEM);
-        avpriv_set_pts_info(vst, 64, 1, 15);
+        fps = av_d2q(av_int2double(avio_rb64(pb)), INT_MAX);
+        avpriv_set_pts_info(vst, 64, fps.den, fps.num);
+        avio_skip(pb, 4);
         vst->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-        vst->avg_frame_rate    = av_inv_q(vst->time_base);
-        vst->nb_frames         = avio_rb32(pb);
+        vst->avg_frame_rate = fps;
+        vst->duration = vst->nb_frames = avio_rb32(pb);
         v = avio_rb32(pb);
         switch (v) {
         case 1:
@@ -340,17 +346,31 @@ static int mv_read_header(AVFormatContext *avctx)
             return AVERROR_INVALIDDATA;
         }
         avpriv_set_pts_info(ast, 33, 1, ast->codecpar->sample_rate);
-        if (set_channels(avctx, ast, avio_rb32(pb)) < 0)
-            return AVERROR_INVALIDDATA;
+
+        bytes_per_sample = avio_rb32(pb);
 
         v = avio_rb32(pb);
         if (v == AUDIO_FORMAT_SIGNED) {
-            ast->codecpar->codec_id = AV_CODEC_ID_PCM_S16BE;
+            switch (bytes_per_sample) {
+            case 1:
+                ast->codecpar->codec_id = AV_CODEC_ID_PCM_S8;
+                break;
+            case 2:
+                ast->codecpar->codec_id = AV_CODEC_ID_PCM_S16BE;
+                break;
+            default:
+                avpriv_request_sample(avctx, "Audio sample size %i bytes", bytes_per_sample);
+                break;
+            }
         } else {
             avpriv_request_sample(avctx, "Audio compression (format %i)", v);
         }
 
-        avio_skip(pb, 12);
+        if (set_channels(avctx, ast, avio_rb32(pb)) < 0)
+            return AVERROR_INVALIDDATA;
+
+        avio_skip(pb, 8);
+
         var_read_metadata(avctx, "title", 0x80);
         var_read_metadata(avctx, "comment", 0x100);
         avio_skip(pb, 0x80);
@@ -365,7 +385,7 @@ static int mv_read_header(AVFormatContext *avctx)
             avio_skip(pb, 8);
             av_add_index_entry(ast, pos, timestamp, asize, 0, AVINDEX_KEYFRAME);
             av_add_index_entry(vst, pos + asize, i, vsize, 0, AVINDEX_KEYFRAME);
-            timestamp += asize / (ast->codecpar->channels * 2LL);
+            timestamp += asize / (ast->codecpar->channels * (uint64_t)bytes_per_sample);
         }
     } else if (!version && avio_rb16(pb) == 3) {
         avio_skip(pb, 4);

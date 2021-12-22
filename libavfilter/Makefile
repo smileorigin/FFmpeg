@@ -44,6 +44,8 @@ OBJS-$(CONFIG_ADECORRELATE_FILTER)           += af_adecorrelate.o
 OBJS-$(CONFIG_ADELAY_FILTER)                 += af_adelay.o
 OBJS-$(CONFIG_ADENORM_FILTER)                += af_adenorm.o
 OBJS-$(CONFIG_ADERIVATIVE_FILTER)            += af_aderivative.o
+OBJS-$(CONFIG_ADYNAMICEQUALIZER_FILTER)      += af_adynamicequalizer.o
+OBJS-$(CONFIG_ADYNAMICSMOOTH_FILTER)         += af_adynamicsmooth.o
 OBJS-$(CONFIG_AECHO_FILTER)                  += af_aecho.o
 OBJS-$(CONFIG_AEMPHASIS_FILTER)              += af_aemphasis.o
 OBJS-$(CONFIG_AEVAL_FILTER)                  += aeval.o
@@ -92,6 +94,7 @@ OBJS-$(CONFIG_ASETTB_FILTER)                 += settb.o
 OBJS-$(CONFIG_ASHOWINFO_FILTER)              += af_ashowinfo.o
 OBJS-$(CONFIG_ASIDEDATA_FILTER)              += f_sidedata.o
 OBJS-$(CONFIG_ASOFTCLIP_FILTER)              += af_asoftclip.o
+OBJS-$(CONFIG_ASPECTRALSTATS_FILTER)         += af_aspectralstats.o
 OBJS-$(CONFIG_ASPLIT_FILTER)                 += split.o
 OBJS-$(CONFIG_ASR_FILTER)                    += af_asr.o
 OBJS-$(CONFIG_ASTATS_FILTER)                 += af_astats.o
@@ -481,6 +484,7 @@ OBJS-$(CONFIG_TRANSPOSE_FILTER)              += vf_transpose.o
 OBJS-$(CONFIG_TRANSPOSE_NPP_FILTER)          += vf_transpose_npp.o
 OBJS-$(CONFIG_TRANSPOSE_OPENCL_FILTER)       += vf_transpose_opencl.o opencl.o opencl/transpose.o
 OBJS-$(CONFIG_TRANSPOSE_VAAPI_FILTER)        += vf_transpose_vaapi.o vaapi_vpp.o
+OBJS-$(CONFIG_TRANSPOSE_VULKAN_FILTER)       += vf_transpose_vulkan.o vulkan.o vulkan_filter.o
 OBJS-$(CONFIG_TRIM_FILTER)                   += trim.o
 OBJS-$(CONFIG_UNPREMULTIPLY_FILTER)          += vf_premultiply.o framesync.o
 OBJS-$(CONFIG_UNSHARP_FILTER)                += vf_unsharp.o
@@ -515,6 +519,10 @@ OBJS-$(CONFIG_XSTACK_FILTER)                 += vf_stack.o framesync.o
 OBJS-$(CONFIG_YADIF_FILTER)                  += vf_yadif.o yadif_common.o
 OBJS-$(CONFIG_YADIF_CUDA_FILTER)             += vf_yadif_cuda.o vf_yadif_cuda.ptx.o \
                                                 yadif_common.o cuda/load_helper.o
+OBJS-$(CONFIG_YADIF_VIDEOTOOLBOX_FILTER)     += vf_yadif_videotoolbox.o \
+                                                metal/vf_yadif_videotoolbox.metallib.o \
+                                                metal/utils.o \
+                                                yadif_common.o
 OBJS-$(CONFIG_YAEPBLUR_FILTER)               += vf_yaepblur.o
 OBJS-$(CONFIG_ZMQ_FILTER)                    += f_zmq.o
 OBJS-$(CONFIG_ZOOMPAN_FILTER)                += vf_zoompan.o
@@ -582,6 +590,9 @@ SKIPHEADERS-$(CONFIG_VULKAN)                 += vulkan.h vulkan_filter.h
 
 TOOLS     = graph2dot
 TESTPROGS = drawutils filtfmts formats integral
+TESTPROGS-$(CONFIG_DNN) += dnn-layer-avgpool dnn-layer-conv2d dnn-layer-dense  \
+                           dnn-layer-depth2space dnn-layer-mathbinary          \
+                           dnn-layer-mathunary dnn-layer-maximum dnn-layer-pad \
 
 TOOLS-$(CONFIG_LIBZMQ) += zmqsend
 

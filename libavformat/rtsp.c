@@ -387,10 +387,9 @@ static void copy_default_source_addrs(struct RTSPSource **addrs, int count,
     int i;
     for (i = 0; i < count; i++) {
         rtsp_src = addrs[i];
-        rtsp_src2 = av_malloc(sizeof(*rtsp_src2));
+        rtsp_src2 = av_memdup(rtsp_src, sizeof(*rtsp_src));
         if (!rtsp_src2)
             continue;
-        memcpy(rtsp_src2, rtsp_src, sizeof(*rtsp_src));
         dynarray_add(dest, dest_count, rtsp_src2);
     }
 }
@@ -1146,7 +1145,7 @@ void ff_rtsp_parse_line(AVFormatContext *s,
 }
 
 /* skip a RTP/TCP interleaved packet */
-void ff_rtsp_skip_packet(AVFormatContext *s)
+int ff_rtsp_skip_packet(AVFormatContext *s)
 {
     RTSPState *rt = s->priv_data;
     int ret, len, len1;
@@ -1154,7 +1153,7 @@ void ff_rtsp_skip_packet(AVFormatContext *s)
 
     ret = ffurl_read_complete(rt->rtsp_hd, buf, 3);
     if (ret != 3)
-        return;
+        return ret < 0 ? ret : AVERROR(EIO);
     len = AV_RB16(buf + 1);
 
     av_log(s, AV_LOG_TRACE, "skipping RTP packet len=%d\n", len);
@@ -1166,9 +1165,11 @@ void ff_rtsp_skip_packet(AVFormatContext *s)
             len1 = sizeof(buf);
         ret = ffurl_read_complete(rt->rtsp_hd, buf, len1);
         if (ret != len1)
-            return;
+            return ret < 0 ? ret : AVERROR(EIO);
         len -= len1;
     }
+
+    return 0;
 }
 
 int ff_rtsp_read_reply(AVFormatContext *s, RTSPMessageHeader *reply,
@@ -1179,8 +1180,8 @@ int ff_rtsp_read_reply(AVFormatContext *s, RTSPMessageHeader *reply,
     char buf[MAX_URL_SIZE], buf1[MAX_URL_SIZE], *q;
     unsigned char ch;
     const char *p;
-    int ret, content_length, line_count = 0, request = 0;
-    unsigned char *content = NULL;
+    int ret, content_length, line_count, request;
+    unsigned char *content;
 
 start:
     line_count = 0;
@@ -1196,14 +1197,17 @@ start:
             ret = ffurl_read_complete(rt->rtsp_hd, &ch, 1);
             av_log(s, AV_LOG_TRACE, "ret=%d c=%02x [%c]\n", ret, ch, ch);
             if (ret != 1)
-                return AVERROR_EOF;
+                return ret < 0 ? ret : AVERROR(EIO);
             if (ch == '\n')
                 break;
             if (ch == '$' && q == buf) {
                 if (return_on_interleaved_data) {
                     return 1;
-                } else
-                    ff_rtsp_skip_packet(s);
+                } else {
+                    ret = ff_rtsp_skip_packet(s);
+                    if (ret < 0)
+                        return ret;
+                }
             } else if (ch != '\r') {
                 if ((q - buf) < sizeof(buf) - 1)
                     *q++ = ch;
@@ -1246,8 +1250,10 @@ start:
         content = av_malloc(content_length + 1);
         if (!content)
             return AVERROR(ENOMEM);
-        if (ffurl_read_complete(rt->rtsp_hd, content, content_length) != content_length)
-            return AVERROR(EIO);
+        if ((ret = ffurl_read_complete(rt->rtsp_hd, content, content_length)) != content_length) {
+            av_freep(&content);
+            return ret < 0 ? ret : AVERROR(EIO);
+        }
         content[content_length] = '\0';
     }
     if (content_ptr)
@@ -2373,9 +2379,9 @@ static int sdp_read_header(AVFormatContext *s)
 {
     RTSPState *rt = s->priv_data;
     RTSPStream *rtsp_st;
-    int size, i, err;
-    char *content;
+    int i, err;
     char url[MAX_URL_SIZE];
+    AVBPrint bp;
 
     if (!ff_network_init())
         return AVERROR(EIO);
@@ -2386,22 +2392,15 @@ static int sdp_read_header(AVFormatContext *s)
         rt->lower_transport = RTSP_LOWER_TRANSPORT_CUSTOM;
 
     /* read the whole sdp file */
-    /* XXX: better loading */
-    content = av_malloc(SDP_MAX_SIZE);
-    if (!content) {
+    av_bprint_init(&bp, 0, AV_BPRINT_SIZE_UNLIMITED);
+    err = avio_read_to_bprint(s->pb, &bp, INT_MAX);
+    if (err < 0 ) {
         ff_network_close();
-        return AVERROR(ENOMEM);
+        av_bprint_finalize(&bp, NULL);
+        return err;
     }
-    size = avio_read(s->pb, content, SDP_MAX_SIZE - 1);
-    if (size <= 0) {
-        av_free(content);
-        ff_network_close();
-        return AVERROR_INVALIDDATA;
-    }
-    content[size] ='\0';
-
-    err = ff_sdp_parse(s, content);
-    av_freep(&content);
+    err = ff_sdp_parse(s, bp.str);
+    av_bprint_finalize(&bp, NULL);
     if (err) goto fail;
 
     /* open each RTP stream */

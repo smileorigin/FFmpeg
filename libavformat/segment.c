@@ -158,6 +158,7 @@ static int segment_mux_init(AVFormatContext *s)
     av_dict_copy(&oc->metadata, s->metadata, 0);
     oc->opaque             = s->opaque;
     oc->io_close           = s->io_close;
+    oc->io_close2          = s->io_close2;
     oc->io_open            = s->io_open;
     oc->flags              = s->flags;
 
@@ -569,7 +570,7 @@ static int open_null_ctx(AVIOContext **ctx)
     uint8_t *buf = av_malloc(buf_size);
     if (!buf)
         return AVERROR(ENOMEM);
-    *ctx = avio_alloc_context(buf, buf_size, AVIO_FLAG_WRITE, NULL, NULL, NULL, NULL);
+    *ctx = avio_alloc_context(buf, buf_size, 1, NULL, NULL, NULL, NULL);
     if (!*ctx) {
         av_free(buf);
         return AVERROR(ENOMEM);
