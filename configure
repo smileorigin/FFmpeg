@@ -298,7 +298,7 @@ External library support:
   --enable-libxvid         enable Xvid encoding via xvidcore,
                            native MPEG-4/Xvid encoder exists [no]
   --enable-libxml2         enable XML parsing using the C library libxml2, needed
-                           for dash demuxing support [no]
+                           for dash and imf demuxing support [no]
   --enable-libzimg         enable z.lib, needed for zscale filter [no]
   --enable-libzmq          enable message passing via libzmq [no]
   --enable-libzvbi         enable teletext support via libzvbi [no]
@@ -3306,6 +3306,8 @@ h264_videotoolbox_encoder_deps="pthreads"
 h264_videotoolbox_encoder_select="atsc_a53 videotoolbox_encoder"
 hevc_videotoolbox_encoder_deps="pthreads"
 hevc_videotoolbox_encoder_select="atsc_a53 videotoolbox_encoder"
+prores_videotoolbox_encoder_deps="pthreads"
+prores_videotoolbox_encoder_select="videotoolbox_encoder"
 libaom_av1_decoder_deps="libaom"
 libaom_av1_encoder_deps="libaom"
 libaom_av1_encoder_select="extract_extradata_bsf"
@@ -3413,6 +3415,7 @@ hls_muxer_select="mpegts_muxer"
 hls_muxer_suggest="gcrypt openssl"
 image2_alias_pix_demuxer_select="image2_demuxer"
 image2_brender_pix_demuxer_select="image2_demuxer"
+imf_demuxer_deps="libxml2"
 ipod_muxer_select="mov_muxer"
 ismv_muxer_select="mov_muxer"
 ivf_muxer_select="av1_metadata_bsf vp9_superframe_bsf"
@@ -3842,8 +3845,8 @@ host_cc_default="gcc"
 doxygen_default="doxygen"
 install="install"
 ln_s_default="ln -s -f"
-metalcc_default="xcrun metal"
-metallib_default="xcrun metallib"
+metalcc_default="xcrun -sdk macosx metal"
+metallib_default="xcrun -sdk macosx metallib"
 nm_default="nm -g"
 pkg_config_default=pkg-config
 ranlib_default="ranlib"
@@ -6363,6 +6366,8 @@ enabled videotoolbox && {
     check_func_headers CoreVideo/CVImageBuffer.h kCVImageBufferTransferFunction_SMPTE_ST_428_1 "-framework CoreVideo"
 }
 
+enabled metal && test_cmd $metalcc -v || disable metal
+
 check_struct "sys/time.h sys/resource.h" "struct rusage" ru_maxrss
 
 check_type "windows.h dxva.h" "DXVA_PicParams_AV1" -DWINAPI_FAMILY=WINAPI_FAMILY_DESKTOP_APP -D_CRT_BUILD_DESKTOP_APP=0
@@ -6817,7 +6822,8 @@ enabled alsa && { check_pkg_config alsa alsa "alsa/asoundlib.h" snd_pcm_htimesta
 enabled libjack &&
     require_pkg_config libjack jack jack/jack.h jack_port_get_latency_range
 
-enabled sndio && check_lib sndio sndio.h sio_open -lsndio
+enabled sndio && { check_pkg_config sndio sndio "sndio.h" sio_open ||
+                   check_lib sndio sndio.h sio_open -lsndio; }
 
 if enabled libcdio; then
     check_pkg_config libcdio libcdio_paranoia "cdio/cdda.h cdio/paranoia.h" cdio_cddap_open ||
@@ -7641,7 +7647,7 @@ LN_S=$ln_s
 CPPFLAGS=$CPPFLAGS
 CFLAGS=$CFLAGS
 CXXFLAGS=$CXXFLAGS
-OBJCFLAGS=$OBJCFLAGS
+OBJCCFLAGS=$OBJCFLAGS
 ASFLAGS=$ASFLAGS
 NVCCFLAGS=$nvccflags
 AS_C=$AS_C
@@ -7691,6 +7697,8 @@ ASDEP_FLAGS=$ASDEP_FLAGS
 X86ASMDEP=$X86ASMDEP
 X86ASMDEP_FLAGS=$X86ASMDEP_FLAGS
 CC_DEPFLAGS=$CC_DEPFLAGS
+CXX_DEPFLAGS=$CXX_DEPFLAGS
+OBJCC_DEPFLAGS=$OBJC_DEPFLAGS
 AS_DEPFLAGS=$AS_DEPFLAGS
 X86ASM_DEPFLAGS=$X86ASM_DEPFLAGS
 HOSTCC=$host_cc
@@ -7746,7 +7754,7 @@ cat > $TMPH <<EOF
 #define FFMPEG_CONFIG_H
 #define FFMPEG_CONFIGURATION "$(c_escape $FFMPEG_CONFIGURATION)"
 #define FFMPEG_LICENSE "$(c_escape $license)"
-#define CONFIG_THIS_YEAR 2021
+#define CONFIG_THIS_YEAR 2022
 #define FFMPEG_DATADIR "$(eval c_escape $datadir)"
 #define AVCONV_DATADIR "$(eval c_escape $datadir)"
 #define CC_IDENT "$(c_escape ${cc_ident:-Unknown compiler})"
