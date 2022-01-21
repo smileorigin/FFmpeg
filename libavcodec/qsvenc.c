@@ -74,6 +74,9 @@ static const struct profile_names hevc_profiles[] = {
     { MFX_PROFILE_HEVC_MAINSP,                  "hevc mainsp"                },
     { MFX_PROFILE_HEVC_REXT,                    "hevc rext"                  },
 #endif
+#if QSV_VERSION_ATLEAST(1, 32)
+    { MFX_PROFILE_HEVC_SCC,                     "hevc scc"                   },
+#endif
 };
 
 static const struct profile_names vp9_profiles[] = {
@@ -315,6 +318,14 @@ static void dump_video_param(AVCodecContext *avctx, QSVEncContext *q,
     case MFX_B_REF_PYRAMID: av_log(avctx, AV_LOG_VERBOSE, "pyramid");   break;
     default:                av_log(avctx, AV_LOG_VERBOSE, "auto");      break;
     }
+
+    av_log(avctx, AV_LOG_VERBOSE, "; PRefType: ");
+    switch (co3->PRefType) {
+    case MFX_P_REF_DEFAULT: av_log(avctx, AV_LOG_VERBOSE, "default");   break;
+    case MFX_P_REF_SIMPLE:  av_log(avctx, AV_LOG_VERBOSE, "simple");    break;
+    case MFX_P_REF_PYRAMID: av_log(avctx, AV_LOG_VERBOSE, "pyramid");   break;
+    default:                av_log(avctx, AV_LOG_VERBOSE, "unknown");   break;
+    }
     av_log(avctx, AV_LOG_VERBOSE, "\n");
 #endif
 
@@ -346,6 +357,13 @@ static void dump_video_param(AVCodecContext *avctx, QSVEncContext *q,
     av_log(avctx, AV_LOG_VERBOSE, "FrameRateExtD: %"PRIu32"; FrameRateExtN: %"PRIu32" \n",
            info->FrameInfo.FrameRateExtD, info->FrameInfo.FrameRateExtN);
 
+#if QSV_HAVE_DISABLEDEBLOCKIDC
+    av_log(avctx, AV_LOG_VERBOSE, "DisableDeblockingIdc: %"PRIu32" \n", co2->DisableDeblockingIdc);
+#endif
+
+#if QSV_VERSION_ATLEAST(1, 26)
+    av_log(avctx, AV_LOG_VERBOSE, "TransformSkip: %s \n", print_threestate(co3->TransformSkip));
+#endif
 }
 
 static void dump_video_vp9_param(AVCodecContext *avctx, QSVEncContext *q,
@@ -578,7 +596,9 @@ static int init_video_param_jpeg(AVCodecContext *avctx, QSVEncContext *q)
     if (!desc)
         return AVERROR_BUG;
 
-    ff_qsv_map_pixfmt(sw_format, &q->param.mfx.FrameInfo.FourCC);
+    ret = ff_qsv_map_pixfmt(sw_format, &q->param.mfx.FrameInfo.FourCC);
+    if (ret < 0)
+        return AVERROR_BUG;
 
     q->param.mfx.FrameInfo.CropX          = 0;
     q->param.mfx.FrameInfo.CropY          = 0;
@@ -681,7 +701,9 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
     if (!desc)
         return AVERROR_BUG;
 
-    ff_qsv_map_pixfmt(sw_format, &q->param.mfx.FrameInfo.FourCC);
+    ret = ff_qsv_map_pixfmt(sw_format, &q->param.mfx.FrameInfo.FourCC);
+    if (ret < 0)
+        return AVERROR_BUG;
 
     q->param.mfx.FrameInfo.CropX          = 0;
     q->param.mfx.FrameInfo.CropY          = 0;
@@ -855,8 +877,6 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
             if (q->mbbrc >= 0)
                 q->extco2.MBBRC = q->mbbrc ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
 
-            if (q->max_frame_size >= 0)
-                q->extco2.MaxFrameSize = q->max_frame_size;
 #if QSV_HAVE_MAX_SLICE_SIZE
             if (q->max_slice_size >= 0)
                 q->extco2.MaxSliceSize = q->max_slice_size;
@@ -885,6 +905,11 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
         if (avctx->codec_id == AV_CODEC_ID_H264 || avctx->codec_id == AV_CODEC_ID_HEVC) {
             if (q->extbrc >= 0)
                 q->extco2.ExtBRC = q->extbrc ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
+            if (q->max_frame_size >= 0)
+                q->extco2.MaxFrameSize = q->max_frame_size;
+#if QSV_HAVE_DISABLEDEBLOCKIDC
+            q->extco2.DisableDeblockingIdc = q->dblk_idc;
+#endif
 
 #if QSV_VERSION_ATLEAST(1, 9)
             if (avctx->qmin >= 0 && avctx->qmax >= 0 && avctx->qmin > avctx->qmax) {
@@ -922,10 +947,46 @@ static int init_video_param(AVCodecContext *avctx, QSVEncContext *q)
 #if QSV_HAVE_CO3
         q->extco3.Header.BufferId      = MFX_EXTBUFF_CODING_OPTION3;
         q->extco3.Header.BufferSz      = sizeof(q->extco3);
+
+        if (avctx->codec_id == AV_CODEC_ID_HEVC ||
+            avctx->codec_id == AV_CODEC_ID_H264) {
+#if QSV_HAVE_PREF
+            switch (q->p_strategy) {
+            case 0:
+                q->extco3.PRefType = MFX_P_REF_DEFAULT;
+                break;
+            case 1:
+                q->extco3.PRefType = MFX_P_REF_SIMPLE;
+                break;
+            case 2:
+                q->extco3.PRefType = MFX_P_REF_PYRAMID;
+                break;
+            default:
+                q->extco3.PRefType = MFX_P_REF_DEFAULT;
+                av_log(avctx, AV_LOG_WARNING,
+                       "invalid p_strategy, set to default\n");
+                break;
+            }
+            if (q->extco3.PRefType == MFX_P_REF_PYRAMID &&
+                avctx->max_b_frames != 0) {
+                av_log(avctx, AV_LOG_WARNING,
+                       "Please set max_b_frames(-bf) to 0 to enable P-pyramid\n");
+            }
+#endif
+        }
+
+        if (avctx->codec_id == AV_CODEC_ID_HEVC) {
+#if QSV_VERSION_ATLEAST(1, 26)
+            if (q->transform_skip >= 0)
+                q->extco3.TransformSkip = q->transform_skip ? MFX_CODINGOPTION_ON :
+                                                              MFX_CODINGOPTION_OFF;
+            else
+                q->extco3.TransformSkip = MFX_CODINGOPTION_UNKNOWN;
+#endif
 #if QSV_HAVE_GPB
-        if (avctx->codec_id == AV_CODEC_ID_HEVC)
             q->extco3.GPB              = q->gpb ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
 #endif
+        }
         q->extparam_internal[q->nb_extparam_internal++] = (mfxExtBuffer *)&q->extco3;
 #endif
     }
@@ -1535,8 +1596,23 @@ static int submit_frame(QSVEncContext *q, const AVFrame *frame,
         qf->surface.Data.PitchLow  = qf->frame->linesize[0];
         qf->surface.Data.Y         = qf->frame->data[0];
         qf->surface.Data.UV        = qf->frame->data[1];
-    }
 
+        /* The SDK checks Data.V when using system memory for VP9 encoding */
+        switch (frame->format) {
+        case AV_PIX_FMT_NV12:
+            qf->surface.Data.V     = qf->surface.Data.UV + 1;
+            break;
+
+        case AV_PIX_FMT_P010:
+            qf->surface.Data.V     = qf->surface.Data.UV + 2;
+            break;
+
+        default:
+            /* should not reach here */
+            av_assert0(0);
+            break;
+        }
+    }
     qf->surface.Data.TimeStamp = av_rescale_q(frame->pts, q->avctx->time_base, (AVRational){1, 90000});
 
     *new_frame = qf;
