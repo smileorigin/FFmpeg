@@ -40,11 +40,11 @@
 #include "mpeg_er.h"
 #include "mpegutils.h"
 #include "mpegvideo.h"
-#include "mpeg4video.h"
+#include "mpeg4videodec.h"
 #include "mpegvideodata.h"
 #include "qpeldsp.h"
-#include "thread.h"
-#include "wmv2.h"
+#include "threadframe.h"
+#include "wmv2dec.h"
 #include <limits.h>
 
 static void dct_unquantize_mpeg1_intra_c(MpegEncContext *s,
@@ -469,7 +469,7 @@ static void backup_duplicate_context(MpegEncContext *bak, MpegEncContext *src)
 #undef COPY
 }
 
-int ff_update_duplicate_context(MpegEncContext *dst, MpegEncContext *src)
+int ff_update_duplicate_context(MpegEncContext *dst, const MpegEncContext *src)
 {
     MpegEncContext bak;
     int i, ret;

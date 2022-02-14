@@ -28,7 +28,6 @@
  */
 
 #define UNCHECKED_BITSTREAM_READER 1
-#include <limits.h>
 
 #include "libavutil/attributes.h"
 #include "libavutil/imgutils.h"
@@ -43,10 +42,10 @@
 #include "mathops.h"
 #include "mpegutils.h"
 #include "unary.h"
-#include "flv.h"
-#include "rv10.h"
+#include "rv10dec.h"
 #include "mpeg4video.h"
 #include "mpegvideodata.h"
+#include "mpeg4videodec.h"
 
 // The defines below define the number of bits that are read at once for
 // reading vlc values. Changing these may improve speed and data cache needs

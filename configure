@@ -3295,7 +3295,6 @@ mp2_at_decoder_select="mpegaudioheader"
 mp3_at_decoder_select="mpegaudioheader"
 pcm_alaw_at_decoder_deps="audiotoolbox"
 pcm_mulaw_at_decoder_deps="audiotoolbox"
-qdmc_decoder_select="fft"
 qdmc_at_decoder_deps="audiotoolbox"
 qdm2_at_decoder_deps="audiotoolbox"
 aac_at_encoder_deps="audiotoolbox"
@@ -3610,8 +3609,6 @@ amovie_filter_deps="avcodec avformat"
 aresample_filter_deps="swresample"
 asr_filter_deps="pocketsphinx"
 ass_filter_deps="libass"
-atempo_filter_deps="avcodec"
-atempo_filter_select="rdft"
 avgblur_opencl_filter_deps="opencl"
 avgblur_vulkan_filter_deps="vulkan spirv_compiler"
 azmq_filter_deps="libzmq"
@@ -3731,8 +3728,6 @@ super2xsai_filter_deps="gpl"
 pixfmts_super2xsai_test_deps="super2xsai_filter"
 superequalizer_filter_deps="avcodec"
 superequalizer_filter_select="rdft"
-surround_filter_deps="avcodec"
-surround_filter_select="rdft"
 tinterlace_filter_deps="gpl"
 tinterlace_merge_test_deps="tinterlace_filter"
 tinterlace_pad_test_deps="tinterlace_filter"
@@ -6506,7 +6501,9 @@ for func in $COMPLEX_FUNCS; do
 done
 
 # these are off by default, so fail if requested and not available
-enabled avisynth          && require_headers "avisynth/avisynth_c.h"
+enabled avisynth          && { require_headers "avisynth/avisynth_c.h avisynth/avs/version.h" &&
+                               { test_cpp_condition avisynth/avs/version.h "AVS_MAJOR_VER >= 3 && AVS_MINOR_VER >= 7 && AVS_BUGFIX_VER >= 1 || AVS_MAJOR_VER >= 3 && AVS_MINOR_VER > 7 || AVS_MAJOR_VER > 3" ||
+                                 die "ERROR: AviSynth+ header version must be >= 3.7.1"; } }
 enabled cuda_nvcc         && { check_nvcc cuda_nvcc || die "ERROR: failed checking for nvcc."; }
 enabled chromaprint       && require chromaprint chromaprint.h chromaprint_get_version -lchromaprint
 enabled decklink          && { require_headers DeckLinkAPI.h &&
@@ -7386,7 +7383,6 @@ enabled zlib && add_cppflags -DZLIB_CONST
 # conditional library dependencies, in any order
 enabled amovie_filter       && prepend avfilter_deps "avformat avcodec"
 enabled aresample_filter    && prepend avfilter_deps "swresample"
-enabled atempo_filter       && prepend avfilter_deps "avcodec"
 enabled bm3d_filter         && prepend avfilter_deps "avcodec"
 enabled cover_rect_filter   && prepend avfilter_deps "avformat avcodec"
 enabled ebur128_filter && enabled swresample && prepend avfilter_deps "swresample"
