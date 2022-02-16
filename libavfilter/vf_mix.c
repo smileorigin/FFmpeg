@@ -45,6 +45,7 @@ typedef struct MixContext {
 
     int depth;
     int max;
+    int planes;
     int nb_planes;
     int linesize[4];
     int height[4];
@@ -138,6 +139,7 @@ static int mix_frames(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
     ThreadData *td = arg;
     AVFrame **in = td->in;
     AVFrame *out = td->out;
+    const float *weights = s->weights;
     int i, p, x, y;
 
     if (s->depth <= 8) {
@@ -146,17 +148,25 @@ static int mix_frames(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
             const int slice_end = (s->height[p] * (jobnr+1)) / nb_jobs;
             uint8_t *dst = out->data[p] + slice_start * out->linesize[p];
 
+            if (!((1 << p) & s->planes)) {
+                av_image_copy_plane(dst, out->linesize[p],
+                                    in[0]->data[p] + slice_start * in[0]->linesize[p],
+                                    in[0]->linesize[p],
+                                    s->linesize[p], slice_end - slice_start);
+                continue;
+            }
+
             for (y = slice_start; y < slice_end; y++) {
                 for (x = 0; x < s->linesize[p]; x++) {
-                    int val = 0;
+                    float val = 0.f;
 
                     for (i = 0; i < s->nb_inputs; i++) {
                         uint8_t src = in[i]->data[p][y * in[i]->linesize[p] + x];
 
-                        val += src * s->weights[i];
+                        val += src * weights[i];
                     }
 
-                    dst[x] = av_clip_uint8(val * s->wfactor);
+                    dst[x] = av_clip_uint8(lrintf(val * s->wfactor));
                 }
 
                 dst += out->linesize[p];
@@ -168,17 +178,25 @@ static int mix_frames(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
             const int slice_end = (s->height[p] * (jobnr+1)) / nb_jobs;
             uint16_t *dst = (uint16_t *)(out->data[p] + slice_start * out->linesize[p]);
 
+            if (!((1 << p) & s->planes)) {
+                av_image_copy_plane((uint8_t *)dst, out->linesize[p],
+                                    in[0]->data[p] + slice_start * in[0]->linesize[p],
+                                    in[0]->linesize[p],
+                                    s->linesize[p], slice_end - slice_start);
+                continue;
+            }
+
             for (y = slice_start; y < slice_end; y++) {
                 for (x = 0; x < s->linesize[p] / 2; x++) {
-                    int val = 0;
+                    float val = 0.f;
 
                     for (i = 0; i < s->nb_inputs; i++) {
                         uint16_t src = AV_RN16(in[i]->data[p] + y * in[i]->linesize[p] + x * 2);
 
-                        val += src * s->weights[i];
+                        val += src * weights[i];
                     }
 
-                    dst[x] = av_clip(val * s->wfactor, 0, s->max);
+                    dst[x] = av_clip(lrintf(val * s->wfactor), 0, s->max);
                 }
 
                 dst += out->linesize[p] / 2;
@@ -330,6 +348,7 @@ static const AVOption mix_options[] = {
     { "inputs", "set number of inputs", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {.i64=2}, 2, INT16_MAX, .flags = FLAGS },
     { "weights", "set weight for each input", OFFSET(weights_str), AV_OPT_TYPE_STRING, {.str="1 1"}, 0, 0, .flags = TFLAGS },
     { "scale", "set scale", OFFSET(scale), AV_OPT_TYPE_FLOAT, {.dbl=0}, 0, INT16_MAX, .flags = TFLAGS },
+    { "planes", "set what planes to filter", OFFSET(planes),   AV_OPT_TYPE_FLAGS, {.i64=15}, 0, 15,  .flags = TFLAGS },
     { "duration", "how to determine end of stream", OFFSET(duration), AV_OPT_TYPE_INT, {.i64=0}, 0, 2, .flags = FLAGS, "duration" },
         { "longest",  "Duration of longest input",  0, AV_OPT_TYPE_CONST, {.i64=0}, 0, 0, FLAGS, "duration" },
         { "shortest", "Duration of shortest input", 0, AV_OPT_TYPE_CONST, {.i64=1}, 0, 0, FLAGS, "duration" },
@@ -409,9 +428,10 @@ static int tmix_filter_frame(AVFilterLink *inlink, AVFrame *in)
 }
 
 static const AVOption tmix_options[] = {
-    { "frames", "set number of successive frames to mix", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {.i64=3}, 1, 128, .flags = FLAGS },
+    { "frames", "set number of successive frames to mix", OFFSET(nb_inputs), AV_OPT_TYPE_INT, {.i64=3}, 1, 1024, .flags = FLAGS },
     { "weights", "set weight for each frame", OFFSET(weights_str), AV_OPT_TYPE_STRING, {.str="1 1 1"}, 0, 0, .flags = TFLAGS },
     { "scale", "set scale", OFFSET(scale), AV_OPT_TYPE_FLOAT, {.dbl=0}, 0, INT16_MAX, .flags = TFLAGS },
+    { "planes", "set what planes to filter", OFFSET(planes),   AV_OPT_TYPE_FLAGS, {.i64=15}, 0, 15,  .flags = TFLAGS },
     { NULL },
 };
 
