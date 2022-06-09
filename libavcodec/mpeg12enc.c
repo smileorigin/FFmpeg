@@ -28,6 +28,7 @@
 #include <stdint.h>
 
 #include "config.h"
+#include "config_components.h"
 #include "libavutil/attributes.h"
 #include "libavutil/avassert.h"
 #include "libavutil/log.h"
@@ -37,6 +38,7 @@
 #include "libavutil/stereo3d.h"
 
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "mathops.h"
 #include "mpeg12.h"
 #include "mpeg12data.h"
@@ -221,7 +223,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
         return ret;
 
     if (find_frame_rate_index(mpeg12) < 0) {
-        if (s->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
+        if (avctx->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
             av_log(avctx, AV_LOG_ERROR, "MPEG-1/2 does not support %d/%d fps\n",
                    avctx->time_base.den, avctx->time_base.num);
             return AVERROR(EINVAL);
@@ -1140,6 +1142,7 @@ av_cold void ff_mpeg1_encode_init(MpegEncContext *s)
     } else {
         s->min_qcoeff = -2047;
         s->max_qcoeff = 2047;
+        s->mpeg_quant = 1;
     }
     if (s->intra_vlc_format) {
         s->intra_ac_vlc_length      =
@@ -1170,11 +1173,7 @@ av_cold void ff_mpeg1_encode_init(MpegEncContext *s)
 static const AVOption mpeg1_options[] = {
     COMMON_OPTS
     FF_MPV_COMMON_OPTS
-#if FF_API_MPEGVIDEO_OPTS
-    FF_MPV_DEPRECATED_MPEG_QUANT_OPT
-    FF_MPV_DEPRECATED_A53_CC_OPT
-    FF_MPV_DEPRECATED_MATRIX_OPT
-#endif
+    FF_MPV_COMMON_MOTION_EST_OPTS
     { NULL },
 };
 
@@ -1203,11 +1202,7 @@ static const AVOption mpeg2_options[] = {
     { LEVEL("low",     10) },
 #undef LEVEL
     FF_MPV_COMMON_OPTS
-#if FF_API_MPEGVIDEO_OPTS
-    { "mpeg_quant",       "Deprecated, does nothing", FF_MPV_OFFSET(mpeg_quant),
-      AV_OPT_TYPE_INT, {.i64 = 1 }, 0, 1, VE | AV_OPT_FLAG_DEPRECATED },
-    FF_MPV_DEPRECATED_MATRIX_OPT
-#endif
+    FF_MPV_COMMON_MOTION_EST_OPTS
     FF_MPEG2_PROFILE_OPTS
     { NULL },
 };
@@ -1223,38 +1218,38 @@ static const AVClass mpeg ## x ## _class = {            \
 mpeg12_class(1)
 mpeg12_class(2)
 
-const AVCodec ff_mpeg1video_encoder = {
-    .name                 = "mpeg1video",
-    .long_name            = NULL_IF_CONFIG_SMALL("MPEG-1 video"),
-    .type                 = AVMEDIA_TYPE_VIDEO,
-    .id                   = AV_CODEC_ID_MPEG1VIDEO,
+const FFCodec ff_mpeg1video_encoder = {
+    .p.name               = "mpeg1video",
+    .p.long_name          = NULL_IF_CONFIG_SMALL("MPEG-1 video"),
+    .p.type               = AVMEDIA_TYPE_VIDEO,
+    .p.id                 = AV_CODEC_ID_MPEG1VIDEO,
     .priv_data_size       = sizeof(MPEG12EncContext),
     .init                 = encode_init,
-    .encode2              = ff_mpv_encode_picture,
+    FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close                = ff_mpv_encode_end,
-    .supported_framerates = ff_mpeg12_frame_rate_tab + 1,
-    .pix_fmts             = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
+    .p.supported_framerates = ff_mpeg12_frame_rate_tab + 1,
+    .p.pix_fmts           = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
                                                            AV_PIX_FMT_NONE },
-    .capabilities         = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
+    .p.capabilities       = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
     .caps_internal        = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
-    .priv_class           = &mpeg1_class,
+    .p.priv_class         = &mpeg1_class,
 };
 
-const AVCodec ff_mpeg2video_encoder = {
-    .name                 = "mpeg2video",
-    .long_name            = NULL_IF_CONFIG_SMALL("MPEG-2 video"),
-    .type                 = AVMEDIA_TYPE_VIDEO,
-    .id                   = AV_CODEC_ID_MPEG2VIDEO,
+const FFCodec ff_mpeg2video_encoder = {
+    .p.name               = "mpeg2video",
+    .p.long_name          = NULL_IF_CONFIG_SMALL("MPEG-2 video"),
+    .p.type               = AVMEDIA_TYPE_VIDEO,
+    .p.id                 = AV_CODEC_ID_MPEG2VIDEO,
     .priv_data_size       = sizeof(MPEG12EncContext),
     .init                 = encode_init,
-    .encode2              = ff_mpv_encode_picture,
+    FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close                = ff_mpv_encode_end,
-    .supported_framerates = ff_mpeg2_frame_rate_tab,
-    .pix_fmts             = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
+    .p.supported_framerates = ff_mpeg2_frame_rate_tab,
+    .p.pix_fmts           = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
                                                            AV_PIX_FMT_YUV422P,
                                                            AV_PIX_FMT_NONE },
-    .capabilities         = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
+    .p.capabilities       = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS,
     .caps_internal        = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
-    .priv_class           = &mpeg2_class,
+    .p.priv_class         = &mpeg2_class,
 };
 #endif /* CONFIG_MPEG1VIDEO_ENCODER || CONFIG_MPEG2VIDEO_ENCODER */

@@ -31,15 +31,14 @@
 
 #include "libavutil/time_internal.h"
 #include "avformat.h"
-#include "internal.h"
 #include "libavcodec/dv_profile.h"
 #include "libavcodec/dv.h"
 #include "dv.h"
+#include "mux.h"
 #include "libavutil/avassert.h"
 #include "libavutil/fifo.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/intreadwrite.h"
-#include "libavutil/opt.h"
 #include "libavutil/timecode.h"
 
 #define MAX_AUDIO_FRAME_SIZE 192000 // 1 second of 48khz 32-bit audio
@@ -333,7 +332,7 @@ static DVMuxContext* dv_init_mux(AVFormatContext* s)
             if (c->n_ast > 1) return NULL;
             /* Some checks -- DV format is very picky about its incoming streams */
             if(st->codecpar->codec_id    != AV_CODEC_ID_PCM_S16LE ||
-               st->codecpar->channels    != 2)
+               st->codecpar->ch_layout.nb_channels    != 2)
                 goto bail_out;
             if (st->codecpar->sample_rate != 48000 &&
                 st->codecpar->sample_rate != 44100 &&

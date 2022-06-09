@@ -1731,6 +1731,14 @@ B-frames. Additionally, eases conformance with the DASH-IF interoperability
 guidelines.
 
 This option is implicitly set when writing ismv (Smooth Streaming) files.
+
+@item -write_btrt @var{bool}
+Force or disable writing bitrate box inside stsd box of a track.
+The box contains decoding buffer size (in bytes), maximum bitrate and
+average bitrate for the track. The box will be skipped if none of these values
+can be computed.
+Default is @code{-1} or @code{auto}, which will write the box only in MP4 mode.
+
 @item -write_prft
 Write producer time reference box (PRFT) with a specified time source for the
 NTP field in the PRFT box. Set value as @samp{wallclock} to specify timesource
@@ -1742,10 +1750,18 @@ where PTS values are set as as wallclock time at the source. For example, an
 encoding use case with decklink capture source where @option{video_pts} and
 @option{audio_pts} are set to @samp{abs_wallclock}.
 
+@item -empty_hdlr_name @var{bool}
+Enable to skip writing the name inside a @code{hdlr} box.
+Default is @code{false}.
+
 @item -movie_timescale @var{scale}
 Set the timescale written in the movie header box (@code{mvhd}).
 Range is 1 to INT_MAX. Default is 1000.
 
+@item -video_track_timescale @var{scale}
+Set the timescale used for video tracks. Range is 0 to INT_MAX.
+If set to @code{0}, the timescale is automatically set based on
+the native stream time base. Default is 0.
 @end table
 
 @subsection Example

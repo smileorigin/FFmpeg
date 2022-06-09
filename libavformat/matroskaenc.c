@@ -21,7 +21,7 @@
 
 #include <stdint.h>
 
-#include "config.h"
+#include "config_components.h"
 
 #include "av1.h"
 #include "avc.h"
@@ -34,7 +34,9 @@
 #include "internal.h"
 #include "isom.h"
 #include "matroska.h"
+#include "mux.h"
 #include "riff.h"
+#include "version.h"
 #include "vorbiscomment.h"
 #include "wv.h"
 
@@ -1009,9 +1011,9 @@ static int put_wv_codecpriv(AVIOContext *pb, const AVCodecParameters *par)
 static int put_flac_codecpriv(AVFormatContext *s, AVIOContext *pb,
                               const AVCodecParameters *par)
 {
-    int write_comment = (par->channel_layout &&
-                         !(par->channel_layout & ~0x3ffffULL) &&
-                         !ff_flac_is_native_layout(par->channel_layout));
+    int write_comment = (par->ch_layout.order == AV_CHANNEL_ORDER_NATIVE &&
+                         !(par->ch_layout.u.mask & ~0x3ffffULL) &&
+                         !ff_flac_is_native_layout(par->ch_layout.u.mask));
     int ret = ff_flac_write_header(pb, par->extradata, par->extradata_size,
                                    !write_comment);
 
@@ -1025,7 +1027,7 @@ static int put_flac_codecpriv(AVFormatContext *s, AVIOContext *pb,
         uint8_t buf[32];
         int64_t len;
 
-        snprintf(buf, sizeof(buf), "0x%"PRIx64, par->channel_layout);
+        snprintf(buf, sizeof(buf), "0x%"PRIx64, par->ch_layout.u.mask);
         av_dict_set(&dict, "WAVEFORMATEXTENSIBLE_CHANNEL_MASK", buf, 0);
 
         len = ff_vorbiscomment_length(dict, vendor, NULL, 0);
@@ -1087,7 +1089,7 @@ static int mkv_write_native_codecprivate(AVFormatContext *s, AVIOContext *pb,
     case AV_CODEC_ID_AV1:
         if (par->extradata_size)
             return ff_isom_write_av1c(dyn_cp, par->extradata,
-                                      par->extradata_size);
+                                      par->extradata_size, 1);
         else
             put_ebml_void(pb, 4 + 3);
         break;
@@ -1769,7 +1771,7 @@ static int mkv_write_track(AVFormatContext *s, MatroskaMuxContext *mkv,
             put_ebml_string(pb, MATROSKA_ID_CODECID, "A_MS/ACM");
 
         subinfo = start_ebml_master(pb, MATROSKA_ID_TRACKAUDIO, 6 + 4 * 9);
-        put_ebml_uint  (pb, MATROSKA_ID_AUDIOCHANNELS    , par->channels);
+        put_ebml_uint(pb, MATROSKA_ID_AUDIOCHANNELS, par->ch_layout.nb_channels);
 
         track->sample_rate_offset = avio_tell(pb);
         put_ebml_float (pb, MATROSKA_ID_AUDIOSAMPLINGFREQ, sample_rate);
@@ -2663,7 +2665,7 @@ static int mkv_check_new_extra_data(AVFormatContext *s, const AVPacket *pkt)
             ret = avio_open_dyn_buf(&dyn_cp);
             if (ret < 0)
                 return ret;
-            ff_isom_write_av1c(dyn_cp, side_data, side_data_size);
+            ff_isom_write_av1c(dyn_cp, side_data, side_data_size, 1);
             codecpriv_size = avio_get_dyn_buf(dyn_cp, &codecpriv);
             if ((ret = dyn_cp->error) < 0 ||
                 !codecpriv_size && (ret = AVERROR_INVALIDDATA)) {
@@ -3170,6 +3172,9 @@ static int mkv_check_bitstream(AVFormatContext *s, AVStream *st,
             ret = ff_stream_add_bitstream_filter(st, "aac_adtstoasc", NULL);
     } else if (st->codecpar->codec_id == AV_CODEC_ID_VP9) {
         ret = ff_stream_add_bitstream_filter(st, "vp9_superframe", NULL);
+    } else if (CONFIG_MATROSKA_MUXER &&
+               st->codecpar->codec_id == AV_CODEC_ID_HDMV_PGS_SUBTITLE) {
+        ret = ff_stream_add_bitstream_filter(st, "pgs_frame_merge", NULL);
     }
 
     return ret;

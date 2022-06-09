@@ -52,7 +52,8 @@ typedef struct ERPicture {
 
 typedef struct ERContext {
     AVCodecContext *avctx;
-    MECmpContext mecc;
+
+    me_cmp_func sad;
     int mecc_inited;
 
     int *mb_index2xy;
@@ -81,7 +82,6 @@ typedef struct ERContext {
     uint16_t pb_time;
     int quarter_sample;
     int partitioned_frame;
-    int ref_count;
 
     void (*decode_mb)(void *opaque, int ref, int mv_dir, int mv_type,
                       int (*mv)[2][4][2],
