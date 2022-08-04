@@ -25,13 +25,18 @@
 #include "avcodec.h"
 
 typedef struct PNMContext {
-    uint8_t *bytestream;
-    uint8_t *bytestream_start;
-    uint8_t *bytestream_end;
+    const uint8_t *bytestream;
+    const uint8_t *bytestream_start;
+    const uint8_t *bytestream_end;
     int maxval;                 ///< maximum value of a pixel
     int type;
     int endian;
+    int half;
     float scale;
+
+    uint32_t mantissatable[2048];
+    uint32_t exponenttable[64];
+    uint16_t offsettable[64];
 } PNMContext;
 
 int ff_pnm_decode_header(AVCodecContext *avctx, PNMContext * const s);

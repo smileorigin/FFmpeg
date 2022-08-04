@@ -26,6 +26,7 @@
 #include "internal.h"
 #include "put_bits.h"
 #include "pnm.h"
+#include "half2float.h"
 
 static void samplecpy(uint8_t *dst, const uint8_t *src, int n, int maxval)
 {
@@ -51,8 +52,8 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
     float scale;
 
     s->bytestream_start =
-    s->bytestream       = (uint8_t *)buf;
-    s->bytestream_end   = (uint8_t *)buf + buf_size;
+    s->bytestream       = buf;
+    s->bytestream_end   = buf + buf_size;
 
     if ((ret = ff_pnm_decode_header(avctx, s)) < 0)
         return ret;
@@ -165,23 +166,23 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
                 ptr+= linesize;
             }
         }else{
-        for (i = 0; i < avctx->height; i++) {
-            if (!upgrade)
-                samplecpy(ptr, s->bytestream, n, s->maxval);
-            else if (upgrade == 1) {
-                unsigned int j, f = (255 * 128 + s->maxval / 2) / s->maxval;
-                for (j = 0; j < n; j++)
-                    ptr[j] = (s->bytestream[j] * f + 64) >> 7;
-            } else if (upgrade == 2) {
-                unsigned int j, v, f = (65535 * 32768 + s->maxval / 2) / s->maxval;
-                for (j = 0; j < n / 2; j++) {
-                    v = AV_RB16(s->bytestream + 2*j);
-                    ((uint16_t *)ptr)[j] = (v * f + 16384) >> 15;
+            for (int i = 0; i < avctx->height; i++) {
+                if (!upgrade)
+                    samplecpy(ptr, s->bytestream, n, s->maxval);
+                else if (upgrade == 1) {
+                    unsigned int f = (255 * 128 + s->maxval / 2) / s->maxval;
+                    for (unsigned j = 0; j < n; j++)
+                        ptr[j] = (s->bytestream[j] * f + 64) >> 7;
+                } else if (upgrade == 2) {
+                    unsigned int f = (65535 * 32768 + s->maxval / 2) / s->maxval;
+                    for (unsigned j = 0; j < n / 2; j++) {
+                        unsigned v = AV_RB16(s->bytestream + 2*j);
+                        ((uint16_t *)ptr)[j] = (v * f + 16384) >> 15;
+                    }
                 }
+                s->bytestream += n;
+                ptr           += linesize;
             }
-            s->bytestream += n;
-            ptr           += linesize;
-        }
         }
         break;
     case AV_PIX_FMT_YUV420P:
@@ -258,68 +259,160 @@ static int pnm_decode_frame(AVCodecContext *avctx, AVFrame *p,
         }
         break;
     case AV_PIX_FMT_GBRPF32:
-        if (avctx->width * avctx->height * 12 > s->bytestream_end - s->bytestream)
-            return AVERROR_INVALIDDATA;
-        scale = 1.f / s->scale;
-        if (s->endian) {
-            float *r, *g, *b;
+        if (!s->half) {
+            if (avctx->width * avctx->height * 12 > s->bytestream_end - s->bytestream)
+                return AVERROR_INVALIDDATA;
+            scale = 1.f / s->scale;
+            if (s->endian) {
+                float *r, *g, *b;
 
-            r = (float *)p->data[2];
-            g = (float *)p->data[0];
-            b = (float *)p->data[1];
-            for (int i = 0; i < avctx->height; i++) {
-                for (int j = 0; j < avctx->width; j++) {
-                    r[j] = av_int2float(AV_RL32(s->bytestream+0)) * scale;
-                    g[j] = av_int2float(AV_RL32(s->bytestream+4)) * scale;
-                    b[j] = av_int2float(AV_RL32(s->bytestream+8)) * scale;
-                    s->bytestream += 12;
+                r = (float *)p->data[2];
+                g = (float *)p->data[0];
+                b = (float *)p->data[1];
+                for (int i = 0; i < avctx->height; i++) {
+                    for (int j = 0; j < avctx->width; j++) {
+                        r[j] = av_int2float(AV_RL32(s->bytestream+0)) * scale;
+                        g[j] = av_int2float(AV_RL32(s->bytestream+4)) * scale;
+                        b[j] = av_int2float(AV_RL32(s->bytestream+8)) * scale;
+                        s->bytestream += 12;
+                    }
+
+                    r += p->linesize[2] / 4;
+                    g += p->linesize[0] / 4;
+                    b += p->linesize[1] / 4;
                 }
+            } else {
+                float *r, *g, *b;
 
-                r += p->linesize[2] / 4;
-                g += p->linesize[0] / 4;
-                b += p->linesize[1] / 4;
+                r = (float *)p->data[2];
+                g = (float *)p->data[0];
+                b = (float *)p->data[1];
+                for (int i = 0; i < avctx->height; i++) {
+                    for (int j = 0; j < avctx->width; j++) {
+                        r[j] = av_int2float(AV_RB32(s->bytestream+0)) * scale;
+                        g[j] = av_int2float(AV_RB32(s->bytestream+4)) * scale;
+                        b[j] = av_int2float(AV_RB32(s->bytestream+8)) * scale;
+                        s->bytestream += 12;
+                    }
+
+                    r += p->linesize[2] / 4;
+                    g += p->linesize[0] / 4;
+                    b += p->linesize[1] / 4;
+                }
             }
         } else {
-            float *r, *g, *b;
+            if (avctx->width * avctx->height * 6 > s->bytestream_end - s->bytestream)
+                return AVERROR_INVALIDDATA;
+            scale = 1.f / s->scale;
+            if (s->endian) {
+                float *r, *g, *b;
 
-            r = (float *)p->data[2];
-            g = (float *)p->data[0];
-            b = (float *)p->data[1];
-            for (int i = 0; i < avctx->height; i++) {
-                for (int j = 0; j < avctx->width; j++) {
-                    r[j] = av_int2float(AV_RB32(s->bytestream+0)) * scale;
-                    g[j] = av_int2float(AV_RB32(s->bytestream+4)) * scale;
-                    b[j] = av_int2float(AV_RB32(s->bytestream+8)) * scale;
-                    s->bytestream += 12;
+                r = (float *)p->data[2];
+                g = (float *)p->data[0];
+                b = (float *)p->data[1];
+                for (int i = 0; i < avctx->height; i++) {
+                    for (int j = 0; j < avctx->width; j++) {
+                        r[j] = av_int2float(half2float(AV_RL16(s->bytestream+0),
+                                                       s->mantissatable,
+                                                       s->exponenttable,
+                                                       s->offsettable)) * scale;
+                        g[j] = av_int2float(half2float(AV_RL16(s->bytestream+2),
+                                                       s->mantissatable,
+                                                       s->exponenttable,
+                                                       s->offsettable)) * scale;
+                        b[j] = av_int2float(half2float(AV_RL16(s->bytestream+4),
+                                                       s->mantissatable,
+                                                       s->exponenttable,
+                                                       s->offsettable)) * scale;
+                        s->bytestream += 6;
+                    }
+
+                    r += p->linesize[2] / 4;
+                    g += p->linesize[0] / 4;
+                    b += p->linesize[1] / 4;
                 }
+            } else {
+                float *r, *g, *b;
 
-                r += p->linesize[2] / 4;
-                g += p->linesize[0] / 4;
-                b += p->linesize[1] / 4;
+                r = (float *)p->data[2];
+                g = (float *)p->data[0];
+                b = (float *)p->data[1];
+                for (int i = 0; i < avctx->height; i++) {
+                    for (int j = 0; j < avctx->width; j++) {
+                        r[j] = av_int2float(half2float(AV_RB16(s->bytestream+0),
+                                                       s->mantissatable,
+                                                       s->exponenttable,
+                                                       s->offsettable)) * scale;
+                        g[j] = av_int2float(half2float(AV_RB16(s->bytestream+2),
+                                                       s->mantissatable,
+                                                       s->exponenttable,
+                                                       s->offsettable)) * scale;
+                        b[j] = av_int2float(half2float(AV_RB16(s->bytestream+4),
+                                                       s->mantissatable,
+                                                       s->exponenttable,
+                                                       s->offsettable)) * scale;
+                        s->bytestream += 6;
+                    }
+
+                    r += p->linesize[2] / 4;
+                    g += p->linesize[0] / 4;
+                    b += p->linesize[1] / 4;
+                }
             }
         }
         break;
     case AV_PIX_FMT_GRAYF32:
-        if (avctx->width * avctx->height * 4 > s->bytestream_end - s->bytestream)
-            return AVERROR_INVALIDDATA;
-        scale = 1.f / s->scale;
-        if (s->endian) {
-            float *g = (float *)p->data[0];
-            for (int i = 0; i < avctx->height; i++) {
-                for (int j = 0; j < avctx->width; j++) {
-                    g[j] = av_int2float(AV_RL32(s->bytestream)) * scale;
-                    s->bytestream += 4;
+        if (!s->half) {
+            if (avctx->width * avctx->height * 4 > s->bytestream_end - s->bytestream)
+                return AVERROR_INVALIDDATA;
+            scale = 1.f / s->scale;
+            if (s->endian) {
+                float *g = (float *)p->data[0];
+                for (int i = 0; i < avctx->height; i++) {
+                    for (int j = 0; j < avctx->width; j++) {
+                        g[j] = av_int2float(AV_RL32(s->bytestream)) * scale;
+                        s->bytestream += 4;
+                    }
+                    g += p->linesize[0] / 4;
                 }
-                g += p->linesize[0] / 4;
+            } else {
+                float *g = (float *)p->data[0];
+                for (int i = 0; i < avctx->height; i++) {
+                    for (int j = 0; j < avctx->width; j++) {
+                        g[j] = av_int2float(AV_RB32(s->bytestream)) * scale;
+                        s->bytestream += 4;
+                    }
+                    g += p->linesize[0] / 4;
+                }
             }
         } else {
-            float *g = (float *)p->data[0];
-            for (int i = 0; i < avctx->height; i++) {
-                for (int j = 0; j < avctx->width; j++) {
-                    g[j] = av_int2float(AV_RB32(s->bytestream)) * scale;
-                    s->bytestream += 4;
+            if (avctx->width * avctx->height * 2 > s->bytestream_end - s->bytestream)
+                return AVERROR_INVALIDDATA;
+            scale = 1.f / s->scale;
+            if (s->endian) {
+                float *g = (float *)p->data[0];
+                for (int i = 0; i < avctx->height; i++) {
+                    for (int j = 0; j < avctx->width; j++) {
+                        g[j] = av_int2float(half2float(AV_RL16(s->bytestream),
+                                                       s->mantissatable,
+                                                       s->exponenttable,
+                                                       s->offsettable)) * scale;
+                        s->bytestream += 2;
+                    }
+                    g += p->linesize[0] / 4;
                 }
-                g += p->linesize[0] / 4;
+            } else {
+                float *g = (float *)p->data[0];
+                for (int i = 0; i < avctx->height; i++) {
+                    for (int j = 0; j < avctx->width; j++) {
+                        g[j] = av_int2float(half2float(AV_RB16(s->bytestream),
+                                                       s->mantissatable,
+                                                       s->exponenttable,
+                                                       s->offsettable)) * scale;
+                        s->bytestream += 2;
+                    }
+                    g += p->linesize[0] / 4;
+                }
             }
         }
         break;
@@ -398,6 +491,28 @@ const FFCodec ff_pfm_decoder = {
     .p.id           = AV_CODEC_ID_PFM,
     .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(PNMContext),
+    FF_CODEC_DECODE_CB(pnm_decode_frame),
+};
+#endif
+
+#if CONFIG_PHM_DECODER
+static av_cold int phm_dec_init(AVCodecContext *avctx)
+{
+    PNMContext *s = avctx->priv_data;
+
+    half2float_table(s->mantissatable, s->exponenttable, s->offsettable);
+
+    return 0;
+}
+
+const FFCodec ff_phm_decoder = {
+    .p.name         = "phm",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("PHM (Portable HalfFloatMap) image"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_PHM,
+    .p.capabilities = AV_CODEC_CAP_DR1,
+    .priv_data_size = sizeof(PNMContext),
+    .init           = phm_dec_init,
     FF_CODEC_DECODE_CB(pnm_decode_frame),
 };
 #endif

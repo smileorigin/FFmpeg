@@ -852,7 +852,7 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
         ff_mpeg1_encode_init(s);
     } else if (CONFIG_H263_ENCODER && s->out_format == FMT_H263) {
         ff_h263_encode_init(s);
-        if (CONFIG_MSMPEG4_ENCODER && s->msmpeg4_version)
+        if (CONFIG_MSMPEG4ENC && s->msmpeg4_version)
             ff_msmpeg4_encode_init(s);
     }
 
@@ -2372,7 +2372,7 @@ static av_always_inline void encode_mb_internal(MpegEncContext *s,
     case AV_CODEC_ID_MSMPEG4V2:
     case AV_CODEC_ID_MSMPEG4V3:
     case AV_CODEC_ID_WMV1:
-        if (CONFIG_MSMPEG4_ENCODER)
+        if (CONFIG_MSMPEG4ENC)
             ff_msmpeg4_encode_mb(s, s->block, motion_x, motion_y);
         break;
     case AV_CODEC_ID_WMV2:
@@ -2558,24 +2558,35 @@ static int sse(MpegEncContext *s, uint8_t *src1, uint8_t *src2, int w, int h, in
 static int sse_mb(MpegEncContext *s){
     int w= 16;
     int h= 16;
+    int chroma_mb_w = w >> s->chroma_x_shift;
+    int chroma_mb_h = h >> s->chroma_y_shift;
 
     if(s->mb_x*16 + 16 > s->width ) w= s->width - s->mb_x*16;
     if(s->mb_y*16 + 16 > s->height) h= s->height- s->mb_y*16;
 
     if(w==16 && h==16)
       if(s->avctx->mb_cmp == FF_CMP_NSSE){
-        return s->mecc.nsse[0](s, s->new_picture->data[0] + s->mb_x * 16 + s->mb_y * s->linesize   * 16, s->dest[0], s->linesize,   16) +
-               s->mecc.nsse[1](s, s->new_picture->data[1] + s->mb_x *  8 + s->mb_y * s->uvlinesize *  8, s->dest[1], s->uvlinesize,  8) +
-               s->mecc.nsse[1](s, s->new_picture->data[2] + s->mb_x *  8 + s->mb_y * s->uvlinesize *  8, s->dest[2], s->uvlinesize,  8);
+        return s->mecc.nsse[0](s, s->new_picture->data[0] + s->mb_x * 16 + s->mb_y * s->linesize * 16,
+                               s->dest[0], s->linesize, 16) +
+               s->mecc.nsse[1](s, s->new_picture->data[1] + s->mb_x * chroma_mb_w + s->mb_y * s->uvlinesize * chroma_mb_h,
+                               s->dest[1], s->uvlinesize, chroma_mb_h) +
+               s->mecc.nsse[1](s, s->new_picture->data[2] + s->mb_x * chroma_mb_w + s->mb_y * s->uvlinesize * chroma_mb_h,
+                               s->dest[2], s->uvlinesize, chroma_mb_h);
       }else{
-        return s->mecc.sse[0](NULL, s->new_picture->data[0] + s->mb_x * 16 + s->mb_y * s->linesize   * 16, s->dest[0], s->linesize,   16) +
-               s->mecc.sse[1](NULL, s->new_picture->data[1] + s->mb_x *  8 + s->mb_y * s->uvlinesize *  8, s->dest[1], s->uvlinesize,  8) +
-               s->mecc.sse[1](NULL, s->new_picture->data[2] + s->mb_x *  8 + s->mb_y * s->uvlinesize *  8, s->dest[2], s->uvlinesize,  8);
+        return s->mecc.sse[0](NULL, s->new_picture->data[0] + s->mb_x * 16 + s->mb_y * s->linesize * 16,
+                              s->dest[0], s->linesize, 16) +
+               s->mecc.sse[1](NULL, s->new_picture->data[1] + s->mb_x * chroma_mb_w + s->mb_y * s->uvlinesize * chroma_mb_h,
+                              s->dest[1], s->uvlinesize, chroma_mb_h) +
+               s->mecc.sse[1](NULL, s->new_picture->data[2] + s->mb_x * chroma_mb_w + s->mb_y * s->uvlinesize * chroma_mb_h,
+                              s->dest[2], s->uvlinesize, chroma_mb_h);
       }
     else
-        return  sse(s, s->new_picture->data[0] + s->mb_x*16 + s->mb_y*s->linesize*16, s->dest[0], w, h, s->linesize)
-               +sse(s, s->new_picture->data[1] + s->mb_x*8  + s->mb_y*s->uvlinesize*8,s->dest[1], w>>1, h>>1, s->uvlinesize)
-               +sse(s, s->new_picture->data[2] + s->mb_x*8  + s->mb_y*s->uvlinesize*8,s->dest[2], w>>1, h>>1, s->uvlinesize);
+        return  sse(s, s->new_picture->data[0] + s->mb_x * 16 + s->mb_y * s->linesize * 16,
+                    s->dest[0], w, h, s->linesize) +
+                sse(s, s->new_picture->data[1] + s->mb_x * chroma_mb_w + s->mb_y * s->uvlinesize * chroma_mb_h,
+                    s->dest[1], w >> s->chroma_x_shift, h >> s->chroma_y_shift, s->uvlinesize) +
+                sse(s, s->new_picture->data[2] + s->mb_x * chroma_mb_w + s->mb_y * s->uvlinesize * chroma_mb_h,
+                    s->dest[2], w >> s->chroma_x_shift, h >> s->chroma_y_shift, s->uvlinesize);
 }
 
 static int pre_estimate_motion_thread(AVCodecContext *c, void *arg){
@@ -2841,7 +2852,7 @@ static int encode_thread(AVCodecContext *c, void *arg){
 
             s->mb_x = mb_x;
             s->mb_y = mb_y;  // moved into loop, can get changed by H.261
-            ff_update_block_index(s);
+            ff_update_block_index(s, 8, 0, s->chroma_x_shift);
 
             if(CONFIG_H261_ENCODER && s->codec_id == AV_CODEC_ID_H261){
                 ff_h261_reorder_mb_index(s);
@@ -3370,7 +3381,7 @@ static int encode_thread(AVCodecContext *c, void *arg){
     }
 
     //not beautiful here but we must write it before flushing so it has to be here
-    if (CONFIG_MSMPEG4_ENCODER && s->msmpeg4_version && s->msmpeg4_version<4 && s->pict_type == AV_PICTURE_TYPE_I)
+    if (CONFIG_MSMPEG4ENC && s->msmpeg4_version && s->msmpeg4_version<4 && s->pict_type == AV_PICTURE_TYPE_I)
         ff_msmpeg4_encode_ext_header(s);
 
     write_slice_end(s);
@@ -3705,7 +3716,7 @@ static int encode_picture(MpegEncContext *s, int picture_number)
     case FMT_H263:
         if (CONFIG_WMV2_ENCODER && s->codec_id == AV_CODEC_ID_WMV2)
             ff_wmv2_encode_picture_header(s, picture_number);
-        else if (CONFIG_MSMPEG4_ENCODER && s->msmpeg4_version)
+        else if (CONFIG_MSMPEG4ENC && s->msmpeg4_version)
             ff_msmpeg4_encode_picture_header(s, picture_number);
         else if (CONFIG_MPEG4_ENCODER && s->h263_pred) {
             ret = ff_mpeg4_encode_picture_header(s, picture_number);
