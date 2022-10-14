@@ -39,7 +39,8 @@ static int xwd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     uint32_t rgb[3] = { 0 }, bitorder = 0;
     uint32_t header_size;
     int i, out_size, ret;
-    uint8_t *ptr, *buf;
+    const uint8_t *ptr;
+    uint8_t *buf;
     uint32_t pal[256];
 
     pixdepth = av_get_bits_per_pixel(desc);
@@ -212,7 +213,7 @@ static int xwd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 
 const FFCodec ff_xwd_encoder = {
     .p.name         = "xwd",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("XWD (X Window Dump) image"),
+    CODEC_LONG_NAME("XWD (X Window Dump) image"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_XWD,
     .p.capabilities = AV_CODEC_CAP_DR1,

@@ -1019,7 +1019,7 @@ static int rd_frame(CinepakEncContext *s, const AVFrame *frame,
         // build a copy of the given frame in the correct colorspace
         for (y = 0; y < s->h; y += 2)
             for (x = 0; x < s->w; x += 2) {
-                uint8_t *ir[2];
+                const uint8_t *ir[2];
                 int32_t r, g, b, rr, gg, bb;
                 ir[0] = frame->data[0] + x * 3 + y * frame->linesize[0];
                 ir[1] = ir[0] + frame->linesize[0];
@@ -1216,9 +1216,10 @@ static av_cold int cinepak_encode_end(AVCodecContext *avctx)
 
 const FFCodec ff_cinepak_encoder = {
     .p.name         = "cinepak",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("Cinepak"),
+    CODEC_LONG_NAME("Cinepak"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_CINEPAK,
+    .p.capabilities = AV_CODEC_CAP_DR1,
     .priv_data_size = sizeof(CinepakEncContext),
     .init           = cinepak_encode_init,
     FF_CODEC_ENCODE_CB(cinepak_encode_frame),

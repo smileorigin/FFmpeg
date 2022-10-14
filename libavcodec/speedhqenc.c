@@ -34,8 +34,9 @@
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "mpeg12data.h"
-#include "mpeg12enc.h"
+#include "mpeg12vlc.h"
 #include "mpegvideo.h"
+#include "mpegvideodata.h"
 #include "mpegvideoenc.h"
 #include "speedhqenc.h"
 
@@ -110,6 +111,9 @@ av_cold int ff_speedhq_encode_init(MpegEncContext *s)
     s->intra_ac_vlc_last_length =
     s->intra_chroma_ac_vlc_length      =
     s->intra_chroma_ac_vlc_last_length = uni_speedhq_ac_vlc_len;
+
+    s->y_dc_scale_table =
+    s->c_dc_scale_table = ff_mpeg2_dc_scale_table[3];
 
     switch (s->avctx->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
@@ -279,7 +283,7 @@ int ff_speedhq_mb_y_order_to_mb(int mb_y_order, int mb_height, int *first_in_sli
 #if CONFIG_SPEEDHQ_ENCODER
 const FFCodec ff_speedhq_encoder = {
     .p.name         = "speedhq",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("NewTek SpeedHQ"),
+    CODEC_LONG_NAME("NewTek SpeedHQ"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_SPEEDHQ,
     .p.priv_class   = &ff_mpv_enc_class,

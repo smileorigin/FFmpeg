@@ -25,9 +25,9 @@
 
 #include "avcodec.h"
 #include "codec_internal.h"
+#include "decode.h"
 #include "get_bits.h"
 #include "hwconfig.h"
-#include "internal.h"
 #include "profiles.h"
 #include "thread.h"
 #include "threadframe.h"
@@ -235,6 +235,8 @@ static int update_size(AVCodecContext *avctx, int w, int h)
 #endif
             break;
         case AV_PIX_FMT_YUV444P:
+        case AV_PIX_FMT_YUV444P10:
+        case AV_PIX_FMT_YUV444P12:
 #if CONFIG_VP9_VAAPI_HWACCEL
             *fmtp++ = AV_PIX_FMT_VAAPI;
 #endif
@@ -1293,17 +1295,13 @@ static int decode_tiles(AVCodecContext *avctx,
                 data += 4;
                 size -= 4;
             }
-            if (tile_size > size) {
-                ff_thread_report_progress(&s->s.frames[CUR_FRAME].tf, INT_MAX, 0);
+            if (tile_size > size)
                 return AVERROR_INVALIDDATA;
-            }
             ret = ff_vpx_init_range_decoder(&td->c_b[tile_col], data, tile_size);
             if (ret < 0)
                 return ret;
-            if (vpx_rac_get_prob_branchy(&td->c_b[tile_col], 128)) { // marker bit
-                ff_thread_report_progress(&s->s.frames[CUR_FRAME].tf, INT_MAX, 0);
+            if (vpx_rac_get_prob_branchy(&td->c_b[tile_col], 128)) // marker bit
                 return AVERROR_INVALIDDATA;
-            }
             data += tile_size;
             size -= tile_size;
         }
@@ -1874,7 +1872,7 @@ static int vp9_decode_update_thread_context(AVCodecContext *dst, const AVCodecCo
 
 const FFCodec ff_vp9_decoder = {
     .p.name                = "vp9",
-    .p.long_name           = NULL_IF_CONFIG_SMALL("Google VP9"),
+    CODEC_LONG_NAME("Google VP9"),
     .p.type                = AVMEDIA_TYPE_VIDEO,
     .p.id                  = AV_CODEC_ID_VP9,
     .priv_data_size        = sizeof(VP9Context),
@@ -1886,7 +1884,7 @@ const FFCodec ff_vp9_decoder = {
                              FF_CODEC_CAP_SLICE_THREAD_HAS_MF |
                              FF_CODEC_CAP_ALLOCATE_PROGRESS,
     .flush                 = vp9_decode_flush,
-    .update_thread_context = ONLY_IF_THREADS_ENABLED(vp9_decode_update_thread_context),
+    UPDATE_THREAD_CONTEXT(vp9_decode_update_thread_context),
     .p.profiles            = NULL_IF_CONFIG_SMALL(ff_vp9_profiles),
     .bsfs                  = "vp9_superframe_split",
     .hw_configs            = (const AVCodecHWConfigInternal *const []) {

@@ -43,8 +43,10 @@
 #include "mpeg12.h"
 #include "mpeg12data.h"
 #include "mpeg12enc.h"
+#include "mpeg12vlc.h"
 #include "mpegutils.h"
 #include "mpegvideo.h"
+#include "mpegvideodata.h"
 #include "mpegvideoenc.h"
 #include "profiles.h"
 
@@ -1132,7 +1134,8 @@ av_cold void ff_mpeg1_encode_init(MpegEncContext *s)
 {
     static AVOnce init_static_once = AV_ONCE_INIT;
 
-    ff_mpeg12_common_init(s);
+    s->y_dc_scale_table =
+    s->c_dc_scale_table = ff_mpeg2_dc_scale_table[s->intra_dc_precision];
 
     s->me.mv_penalty = mv_penalty;
     s->fcode_tab     = fcode_tab;
@@ -1220,7 +1223,7 @@ mpeg12_class(2)
 
 const FFCodec ff_mpeg1video_encoder = {
     .p.name               = "mpeg1video",
-    .p.long_name          = NULL_IF_CONFIG_SMALL("MPEG-1 video"),
+    CODEC_LONG_NAME("MPEG-1 video"),
     .p.type               = AVMEDIA_TYPE_VIDEO,
     .p.id                 = AV_CODEC_ID_MPEG1VIDEO,
     .priv_data_size       = sizeof(MPEG12EncContext),
@@ -1237,7 +1240,7 @@ const FFCodec ff_mpeg1video_encoder = {
 
 const FFCodec ff_mpeg2video_encoder = {
     .p.name               = "mpeg2video",
-    .p.long_name          = NULL_IF_CONFIG_SMALL("MPEG-2 video"),
+    CODEC_LONG_NAME("MPEG-2 video"),
     .p.type               = AVMEDIA_TYPE_VIDEO,
     .p.id                 = AV_CODEC_ID_MPEG2VIDEO,
     .priv_data_size       = sizeof(MPEG12EncContext),
