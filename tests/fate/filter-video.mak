@@ -16,8 +16,8 @@ fate-filter-yadif-mode0: CMD = framecrc -flags bitexact -idct simple -i $(TARGET
 fate-filter-yadif-mode1: CMD = framecrc -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -frames:v 59 -vf yadif=1
 
 FATE_YADIF-$(call FILTERDEMDEC, YADIF SCALE, MPEGTS, MPEG2VIDEO) += fate-filter-yadif10 fate-filter-yadif16
-fate-filter-yadif10: CMD = framecrc -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -flags bitexact -pix_fmt yuv420p10le -frames:v 30 -vf yadif=0,scale
-fate-filter-yadif16: CMD = framecrc -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -flags bitexact -pix_fmt yuv420p16le -frames:v 30 -vf yadif=0,scale
+fate-filter-yadif10: CMD = framecrc -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -flags bitexact -pix_fmt yuv420p10le -frames:v 30 -vf scale,yadif=0
+fate-filter-yadif16: CMD = framecrc -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -flags bitexact -pix_fmt yuv420p16le -frames:v 30 -vf scale,yadif=0
 
 FATE_FILTER_SAMPLES-yes += $(FATE_YADIF-yes)
 
@@ -313,6 +313,9 @@ FATE_FILTER_VSYNTH-$(call FILTERDEMDEC, TRIM, IMAGE2, PGM) += $(FATE_TRIM)
 
 FATE_FILTER-$(call FILTERFRAMECRC, TESTSRC2 UNTILE) += fate-filter-untile
 fate-filter-untile: CMD = framecrc -lavfi testsrc2=d=1:r=2,untile=2x2
+
+FATE_FILTER-$(call FILTERFRAMECRC, TESTSRC2 UNTILE) += fate-filter-untile-yuv422p
+fate-filter-untile-yuv422p: CMD = framecrc -lavfi testsrc2=d=1:r=2,format=yuv422p,untile=2x2
 
 FATE_FILTER_VSYNTH_PGMYUV-$(CONFIG_UNSHARP_FILTER) += fate-filter-unsharp
 fate-filter-unsharp: CMD = framecrc -c:v pgmyuv -i $(SRC) -vf unsharp=11:11:-1.5:11:11:-1.5
