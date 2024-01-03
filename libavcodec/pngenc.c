@@ -442,6 +442,12 @@ static int encode_headers(AVCodecContext *avctx, const AVFrame *pict)
     if (png_get_gama(pict->color_trc, s->buf))
         png_write_chunk(&s->bytestream, MKTAG('g', 'A', 'M', 'A'), s->buf, 4);
 
+    if (avctx->bits_per_raw_sample > 0 && avctx->bits_per_raw_sample < s->bit_depth) {
+        int len = ff_png_get_nb_channels(s->color_type);
+        memset(s->buf, avctx->bits_per_raw_sample, len);
+        png_write_chunk(&s->bytestream, MKTAG('s', 'B', 'I', 'T'), s->buf, len);
+    }
+
     /* put the palette if needed, must be after colorspace information */
     if (s->color_type == PNG_COLOR_TYPE_PALETTE) {
         int has_alpha, alpha, i;
@@ -1053,8 +1059,7 @@ static int encode_apng(AVCodecContext *avctx, AVPacket *pkt,
             }
         }
 
-        av_frame_unref(s->last_frame);
-        ret = av_frame_ref(s->last_frame, pict);
+        ret = av_frame_replace(s->last_frame, pict);
         if (ret < 0)
             return ret;
 
@@ -1184,7 +1189,6 @@ static const AVOption options[] = {
 
 static const AVClass pngenc_class = {
     .class_name = "(A)PNG encoder",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

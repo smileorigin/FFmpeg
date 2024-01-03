@@ -66,7 +66,6 @@ static const AVOption ff_avio_options[] = {
 
 const AVClass ff_avio_class = {
     .class_name = "AVIOContext",
-    .item_name  = av_default_item_name,
     .version    = LIBAVUTIL_VERSION_INT,
     .option     = ff_avio_options,
     .child_next = ff_avio_child_next,
@@ -84,7 +83,11 @@ void ffio_init_context(FFIOContext *ctx,
                   int write_flag,
                   void *opaque,
                   int (*read_packet)(void *opaque, uint8_t *buf, int buf_size),
+#if FF_API_AVIO_WRITE_NONCONST
                   int (*write_packet)(void *opaque, uint8_t *buf, int buf_size),
+#else
+                  int (*write_packet)(void *opaque, const uint8_t *buf, int buf_size),
+#endif
                   int64_t (*seek)(void *opaque, int64_t offset, int whence))
 {
     AVIOContext *const s = &ctx->pub;
@@ -127,13 +130,27 @@ void ffio_init_context(FFIOContext *ctx,
     ctx->short_seek_get      = NULL;
 }
 
+void ffio_init_read_context(FFIOContext *s, const uint8_t *buffer, int buffer_size)
+{
+    ffio_init_context(s, (unsigned char*)buffer, buffer_size, 0, NULL, NULL, NULL, NULL);
+}
+
+void ffio_init_write_context(FFIOContext *s, uint8_t *buffer, int buffer_size)
+{
+    ffio_init_context(s, buffer, buffer_size, 1, NULL, NULL, NULL, NULL);
+}
+
 AVIOContext *avio_alloc_context(
                   unsigned char *buffer,
                   int buffer_size,
                   int write_flag,
                   void *opaque,
                   int (*read_packet)(void *opaque, uint8_t *buf, int buf_size),
+#if FF_API_AVIO_WRITE_NONCONST
                   int (*write_packet)(void *opaque, uint8_t *buf, int buf_size),
+#else
+                  int (*write_packet)(void *opaque, const uint8_t *buf, int buf_size),
+#endif
                   int64_t (*seek)(void *opaque, int64_t offset, int whence))
 {
     FFIOContext *s = av_malloc(sizeof(*s));
@@ -155,12 +172,20 @@ static void writeout(AVIOContext *s, const uint8_t *data, int len)
     if (!s->error) {
         int ret = 0;
         if (s->write_data_type)
+#if FF_API_AVIO_WRITE_NONCONST
             ret = s->write_data_type(s->opaque, (uint8_t *)data,
+#else
+            ret = s->write_data_type(s->opaque, data,
+#endif
                                      len,
                                      ctx->current_type,
                                      ctx->last_time);
         else if (s->write_packet)
+#if FF_API_AVIO_WRITE_NONCONST
             ret = s->write_packet(s->opaque, (uint8_t *)data, len);
+#else
+            ret = s->write_packet(s->opaque, data, len);
+#endif
         if (ret < 0) {
             s->error = ret;
         } else {
@@ -945,6 +970,39 @@ uint64_t ffio_read_varlen(AVIOContext *bc){
     return val;
 }
 
+unsigned int ffio_read_leb(AVIOContext *s) {
+    int more, i = 0;
+    unsigned leb = 0;
+
+    do {
+        int byte = avio_r8(s);
+        unsigned bits = byte & 0x7f;
+        more = byte & 0x80;
+        if (i <= 4)
+            leb |= bits << (i * 7);
+        if (++i == 8)
+            break;
+    } while (more);
+
+    return leb;
+}
+
+void ffio_write_leb(AVIOContext *s, unsigned val)
+{
+    int len;
+    uint8_t byte;
+
+    len = (av_log2(val) + 7) / 7;
+
+    for (int i = 0; i < len; i++) {
+        byte = val >> (7 * i) & 0x7f;
+        if (i < len - 1)
+            byte |= 0x80;
+
+        avio_w8(s, byte);
+    }
+}
+
 int ffio_fdopen(AVIOContext **s, URLContext *h)
 {
     uint8_t *buffer = NULL;
@@ -966,9 +1024,7 @@ int ffio_fdopen(AVIOContext **s, URLContext *h)
         return AVERROR(ENOMEM);
 
     *s = avio_alloc_context(buffer, buffer_size, h->flags & AVIO_FLAG_WRITE, h,
-                            (int (*)(void *, uint8_t *, int))  ffurl_read,
-                            (int (*)(void *, uint8_t *, int))  ffurl_write,
-                            (int64_t (*)(void *, int64_t, int))ffurl_seek);
+                            ffurl_read2, ffurl_write2, ffurl_seek2);
     if (!*s) {
         av_freep(&buffer);
         return AVERROR(ENOMEM);
@@ -996,7 +1052,7 @@ int ffio_fdopen(AVIOContext **s, URLContext *h)
         if (h->prot->url_read_seek)
             (*s)->seekable |= AVIO_SEEKABLE_TIME;
     }
-    ((FFIOContext*)(*s))->short_seek_get = (int (*)(void *))ffurl_get_short_seek;
+    ((FFIOContext*)(*s))->short_seek_get = ffurl_get_short_seek;
     (*s)->av_class = &ff_avio_class;
     return 0;
 }
@@ -1006,7 +1062,7 @@ URLContext* ffio_geturlcontext(AVIOContext *s)
     if (!s)
         return NULL;
 
-    if (s->opaque && s->read_packet == (int (*)(void *, uint8_t *, int))ffurl_read)
+    if (s->opaque && s->read_packet == ffurl_read2)
         return s->opaque;
     else
         return NULL;
@@ -1388,7 +1444,11 @@ typedef struct DynBuffer {
     uint8_t io_buffer[1];
 } DynBuffer;
 
+#if FF_API_AVIO_WRITE_NONCONST
 static int dyn_buf_write(void *opaque, uint8_t *buf, int buf_size)
+#else
+static int dyn_buf_write(void *opaque, const uint8_t *buf, int buf_size)
+#endif
 {
     DynBuffer *d = opaque;
     unsigned new_size;
@@ -1420,7 +1480,11 @@ static int dyn_buf_write(void *opaque, uint8_t *buf, int buf_size)
     return buf_size;
 }
 
+#if FF_API_AVIO_WRITE_NONCONST
 static int dyn_packet_buf_write(void *opaque, uint8_t *buf, int buf_size)
+#else
+static int dyn_packet_buf_write(void *opaque, const uint8_t *buf, int buf_size)
+#endif
 {
     unsigned char buf1[4];
     int ret;
@@ -1557,7 +1621,11 @@ void ffio_free_dyn_buf(AVIOContext **s)
     avio_context_free(s);
 }
 
+#if FF_API_AVIO_WRITE_NONCONST
 static int null_buf_write(void *opaque, uint8_t *buf, int buf_size)
+#else
+static int null_buf_write(void *opaque, const uint8_t *buf, int buf_size)
+#endif
 {
     DynBuffer *d = opaque;
 

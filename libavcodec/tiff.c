@@ -337,7 +337,7 @@ static void av_always_inline dng_blit(TiffContext *s, uint8_t *dst, int dst_stri
            (split vertically in the middle). */
         for (line = 0; line < height / 2; line++) {
             uint16_t *dst_u16 = (uint16_t *)dst;
-            uint16_t *src_u16 = (uint16_t *)src;
+            const uint16_t *src_u16 = (const uint16_t *)src;
 
             /* Blit first half of input row row to initial row of output */
             for (col = 0; col < width; col++)
@@ -360,7 +360,7 @@ static void av_always_inline dng_blit(TiffContext *s, uint8_t *dst, int dst_stri
         if (is_u16) {
             for (line = 0; line < height; line++) {
                 uint16_t *dst_u16 = (uint16_t *)dst;
-                uint16_t *src_u16 = (uint16_t *)src;
+                const uint16_t *src_u16 = (const uint16_t *)src;
 
                 for (col = 0; col < width; col++)
                     *dst_u16++ = dng_process_color16(*src_u16++, s->dng_lut,
@@ -570,7 +570,7 @@ static int tiff_uncompress_lzma(uint8_t *dst, uint64_t *len, const uint8_t *src,
     lzma_stream stream = LZMA_STREAM_INIT;
     lzma_ret ret;
 
-    stream.next_in   = (uint8_t *)src;
+    stream.next_in   = src;
     stream.avail_in  = size;
     stream.next_out  = dst;
     stream.avail_out = *len;
@@ -1036,7 +1036,7 @@ static int dng_decode_tiles(AVCodecContext *avctx, AVFrame *frame,
 
     /* Frame is ready to be output */
     frame->pict_type = AV_PICTURE_TYPE_I;
-    frame->key_frame = 1;
+    frame->flags |= AV_FRAME_FLAG_KEY;
 
     return avpkt->size;
 }
@@ -1451,7 +1451,7 @@ static int tiff_decode_tag(TiffContext *s, AVFrame *frame)
         break;
     case TIFF_GRAY_RESPONSE_CURVE:
     case DNG_LINEARIZATION_TABLE:
-        if (count > FF_ARRAY_ELEMS(s->dng_lut))
+        if (count < 1 || count > FF_ARRAY_ELEMS(s->dng_lut))
             return AVERROR_INVALIDDATA;
         for (int i = 0; i < count; i++)
             s->dng_lut[i] = ff_tget(&s->gb, type, s->le);
@@ -2379,6 +2379,7 @@ again:
         }
     }
 
+    p->flags |= AV_FRAME_FLAG_KEY;
     *got_frame = 1;
 
     return avpkt->size;
@@ -2453,7 +2454,6 @@ static const AVOption tiff_options[] = {
 
 static const AVClass tiff_decoder_class = {
     .class_name = "TIFF decoder",
-    .item_name  = av_default_item_name,
     .option     = tiff_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

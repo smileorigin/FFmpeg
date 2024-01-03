@@ -37,7 +37,9 @@
 #include "avfilter.h"
 #include "buffersink.h"
 #include "filters.h"
+#include "formats.h"
 #include "internal.h"
+#include "video.h"
 
 typedef struct BufferSinkContext {
     const AVClass *class;
@@ -162,6 +164,13 @@ static av_cold int common_init(AVFilterContext *ctx)
     return 0;
 }
 
+static void uninit(AVFilterContext *ctx)
+{
+    BufferSinkContext *buf = ctx->priv;
+
+    av_frame_free(&buf->peeked_frame);
+}
+
 static int activate(AVFilterContext *ctx)
 {
     BufferSinkContext *buf = ctx->priv;
@@ -200,6 +209,8 @@ MAKE_AVFILTERLINK_ACCESSOR(AVRational       , frame_rate         )
 MAKE_AVFILTERLINK_ACCESSOR(int              , w                  )
 MAKE_AVFILTERLINK_ACCESSOR(int              , h                  )
 MAKE_AVFILTERLINK_ACCESSOR(AVRational       , sample_aspect_ratio)
+MAKE_AVFILTERLINK_ACCESSOR(enum AVColorSpace, colorspace)
+MAKE_AVFILTERLINK_ACCESSOR(enum AVColorRange, color_range)
 
 #if FF_API_OLD_CHANNEL_LAYOUT
 FF_DISABLE_DEPRECATION_WARNINGS
@@ -291,7 +302,7 @@ static int asink_query_formats(AVFilterContext *ctx)
         cleanup_redundant_layouts(ctx);
         for (i = 0; i < NB_ITEMS(buf->channel_layouts); i++)
             if ((ret = av_channel_layout_from_mask(&layout, buf->channel_layouts[i])) < 0 ||
-                (ret = ff_add_channel_layout(&layouts, &layout) < 0))
+                (ret = ff_add_channel_layout(&layouts, &layout)) < 0)
                 return ret;
         for (i = 0; i < NB_ITEMS(buf->channel_counts); i++) {
             layout = FF_COUNT2LAYOUT(buf->channel_counts[i]);
@@ -377,30 +388,17 @@ static const AVOption abuffersink_options[] = {
 AVFILTER_DEFINE_CLASS(buffersink);
 AVFILTER_DEFINE_CLASS(abuffersink);
 
-static const AVFilterPad avfilter_vsink_buffer_inputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
-    },
-};
-
 const AVFilter ff_vsink_buffer = {
     .name          = "buffersink",
     .description   = NULL_IF_CONFIG_SMALL("Buffer video frames, and make them available to the end of the filter graph."),
     .priv_size     = sizeof(BufferSinkContext),
     .priv_class    = &buffersink_class,
     .init          = common_init,
+    .uninit        = uninit,
     .activate      = activate,
-    FILTER_INPUTS(avfilter_vsink_buffer_inputs),
+    FILTER_INPUTS(ff_video_default_filterpad),
     .outputs       = NULL,
     FILTER_QUERY_FUNC(vsink_query_formats),
-};
-
-static const AVFilterPad avfilter_asink_abuffer_inputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_AUDIO,
-    },
 };
 
 const AVFilter ff_asink_abuffer = {
@@ -409,8 +407,9 @@ const AVFilter ff_asink_abuffer = {
     .priv_class    = &abuffersink_class,
     .priv_size     = sizeof(BufferSinkContext),
     .init          = common_init,
+    .uninit        = uninit,
     .activate      = activate,
-    FILTER_INPUTS(avfilter_asink_abuffer_inputs),
+    FILTER_INPUTS(ff_audio_default_filterpad),
     .outputs       = NULL,
     FILTER_QUERY_FUNC(asink_query_formats),
 };

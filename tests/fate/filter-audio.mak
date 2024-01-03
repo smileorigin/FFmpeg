@@ -184,7 +184,7 @@ fate-filter-pan-downmix2: SRC = $(TARGET_PATH)/tests/data/asynth-44100-11.wav
 fate-filter-pan-downmix2: CMD = framecrc -ss 3.14 -i $(SRC) -frames:a 20 -filter:a "pan=5C|c0=0.7*c0+0.7*c10|c1=c9|c2=c8|c3=c7|c4=c6"
 
 FATE_AFILTER-$(call ALLYES, LAVFI_INDEV, AEVALSRC_FILTER SILENCEREMOVE_FILTER) += fate-filter-silenceremove
-fate-filter-silenceremove: CMD = framecrc -auto_conversion_filters -f lavfi -i "aevalsrc=between(t\,1\,2)+between(t\,4\,5)+between(t\,7\,9):d=10:n=8192,silenceremove=start_periods=0:start_duration=0:start_threshold=0:stop_periods=-1:stop_duration=0:stop_threshold=-90dB:window=0:detection=peak"
+fate-filter-silenceremove: CMD = framecrc -auto_conversion_filters -f lavfi -i "aevalsrc=between(t\,1\,2)+between(t\,4\,5)+between(t\,7\,9):d=10:n=8192,silenceremove=start_periods=0:start_duration=0:start_threshold=0:stop_periods=-1:stop_duration=0:stop_threshold=-90dB:window=0:detection=avg"
 
 FATE_AFILTER_SAMPLES-$(call FILTERDEMDECENCMUX, STEREOTOOLS, WAV, PCM_S16LE, PCM_S16LE, WAV) += fate-filter-stereotools
 fate-filter-stereotools: SRC = $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav
@@ -270,6 +270,23 @@ $(FATE_ATRIM): tests/data/asynth-44100-2.wav
 $(FATE_ATRIM): SRC = $(TARGET_PATH)/tests/data/asynth-44100-2.wav
 
 FATE_AFILTER-$(call FILTERDEMDECENCMUX, ATRIM, WAV, PCM_S16LE, PCM_S16LE, WAV) += $(FATE_ATRIM)
+
+FATE_ASEGMENT += fate-filter-asegment-samples-absolute
+fate-filter-asegment-samples-absolute: CMD = framecrc -i $(SRC) -lavfi asegment=samples="10000|20000"
+
+FATE_ASEGMENT += fate-filter-asegment-samples-relative
+fate-filter-asegment-samples-relative: CMD = framecrc -i $(SRC) -lavfi asegment=samples="10000|+10000"
+
+FATE_ASEGMENT += fate-filter-asegment-timestamps-absolute
+fate-filter-asegment-timestamps-absolute: CMD = framecrc -i $(SRC) -lavfi asegment=timestamps="1|3"
+
+FATE_ASEGMENT += fate-filter-asegment-timestamps-relative
+fate-filter-asegment-timestamps-relative: CMD = framecrc -i $(SRC) -lavfi asegment=timestamps="1|+2"
+
+$(FATE_ASEGMENT): tests/data/asynth-44100-2.wav
+$(FATE_ASEGMENT): SRC = $(TARGET_PATH)/tests/data/asynth-44100-2.wav
+
+FATE_AFILTER-$(call FILTERDEMDECENCMUX, ASEGMENT, WAV, PCM_S16LE, PCM_S16LE, WAV) += $(FATE_ASEGMENT)
 
 FATE_FILTER_CHANNELMAP += fate-filter-channelmap-one-int
 fate-filter-channelmap-one-int: tests/data/filtergraphs/channelmap_one_int

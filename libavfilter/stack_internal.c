@@ -333,10 +333,9 @@ static const AVFilterPad stack_outputs[] = {
         { NULL }                                                        \
     }
 
-#define DEFINE_STACK_FILTER(category, api, capi)                        \
+#define DEFINE_STACK_FILTER(category, api, capi, filter_flags)          \
     static const AVClass category##_##api##_class = {                   \
         .class_name = #category "_" #api,                               \
-        .item_name  = av_default_item_name,                             \
         .option     = category##_##api##_options,                       \
         .version    = LIBAVUTIL_VERSION_INT,                            \
     };                                                                  \
@@ -351,5 +350,5 @@ static const AVFilterPad stack_outputs[] = {
         FILTER_QUERY_FUNC(api##_stack_query_formats),                   \
         FILTER_OUTPUTS(stack_outputs),                                  \
         .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,                 \
-        .flags          = AVFILTER_FLAG_DYNAMIC_INPUTS,                 \
+        .flags          = AVFILTER_FLAG_DYNAMIC_INPUTS | filter_flags,  \
     }

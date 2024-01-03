@@ -26,9 +26,7 @@
 
 #include "libavutil/internal.h"
 #include "avfilter.h"
-#include "formats.h"
 #include "framequeue.h"
-#include "video.h"
 
 typedef struct AVFilterCommand {
     double time;                ///< time expressed in seconds
@@ -205,6 +203,12 @@ enum FilterFormatsState {
  */
 int ff_fmt_is_in(int fmt, const int *fmts);
 
+/**
+ * Returns true if a pixel format is "regular YUV", which includes all pixel
+ * formats that are affected by YUV colorspace negotiation.
+ */
+int ff_fmt_is_regular_yuv(enum AVPixelFormat fmt);
+
 /* Functions to parse audio format arguments */
 
 /**
@@ -243,8 +247,6 @@ av_warn_unused_result
 int ff_parse_channel_layout(AVChannelLayout *ret, int *nret, const char *arg,
                             void *log_ctx);
 
-void ff_update_link_current_pts(AVFilterLink *link, int64_t pts);
-
 /**
  * Set the status field of a link from the source filter.
  * The pts should reflect the timestamp of the status change,
@@ -253,12 +255,6 @@ void ff_update_link_current_pts(AVFilterLink *link, int64_t pts);
  * end time of the last frame.
  */
 void ff_avfilter_link_set_in_status(AVFilterLink *link, int status, int64_t pts);
-
-/**
- * Set the status field of a link from the destination filter.
- * The pts should probably be left unset (AV_NOPTS_VALUE).
- */
-void ff_avfilter_link_set_out_status(AVFilterLink *link, int status, int64_t pts);
 
 #define D2TS(d)      (isnan(d) ? AV_NOPTS_VALUE : (int64_t)(d))
 #define TS2D(ts)     ((ts) == AV_NOPTS_VALUE ? NAN : (double)(ts))
@@ -321,7 +317,6 @@ int ff_request_frame(AVFilterLink *link);
 #define AVFILTER_DEFINE_CLASS_EXT(name, desc, options) \
     static const AVClass name##_class = {       \
         .class_name = desc,                     \
-        .item_name  = av_default_item_name,     \
         .option     = options,                  \
         .version    = LIBAVUTIL_VERSION_INT,    \
         .category   = AV_CLASS_CATEGORY_FILTER, \

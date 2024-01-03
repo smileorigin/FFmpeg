@@ -20,7 +20,6 @@
 
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
-#include "avformat.h"
 #include "url.h"
 
 typedef struct SubfileContext {
@@ -45,7 +44,6 @@ static const AVOption subfile_options[] = {
 
 static const AVClass subfile_class = {
     .class_name = "subfile",
-    .item_name  = av_default_item_name,
     .option     = subfile_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

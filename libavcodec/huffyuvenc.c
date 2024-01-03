@@ -39,6 +39,7 @@
 #include "huffyuvencdsp.h"
 #include "lossless_videoencdsp.h"
 #include "put_bits.h"
+#include "libavutil/emms.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 
@@ -1065,14 +1066,12 @@ static const AVOption ff_options[] = {
 
 static const AVClass normal_class = {
     .class_name = "huffyuv",
-    .item_name  = av_default_item_name,
     .option     = normal_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
 static const AVClass ff_class = {
     .class_name = "ffvhuff",
-    .item_name  = av_default_item_name,
     .option     = ff_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

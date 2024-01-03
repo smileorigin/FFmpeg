@@ -865,6 +865,11 @@ av_cold void ff_h263_encode_init(MpegEncContext *s)
         s->c_dc_scale_table= ff_mpeg1_dc_scale_table;
     }
 
+    if (s->lmin > s->lmax) {
+        av_log(s->avctx, AV_LOG_WARNING, "Clipping lmin value to %d\n", s->lmax);
+        s->lmin = s->lmax;
+    }
+
     ff_thread_once(&init_static_once, h263_encode_init_static);
 }
 
@@ -891,7 +896,6 @@ static const AVOption h263_options[] = {
 
 static const AVClass h263_class = {
     .class_name = "H.263 encoder",
-    .item_name  = av_default_item_name,
     .option     = h263_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -922,7 +926,6 @@ static const AVOption h263p_options[] = {
 };
 static const AVClass h263p_class = {
     .class_name = "H.263p encoder",
-    .item_name  = av_default_item_name,
     .option     = h263p_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

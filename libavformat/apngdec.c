@@ -274,7 +274,7 @@ static int decode_fctl_chunk(AVFormatContext *s, APNGDemuxContext *ctx, AVPacket
             "delay_den: %"PRIu16", "
             "dispose_op: %d, "
             "blend_op: %d\n",
-            __FUNCTION__,
+            __func__,
             sequence_number,
             width,
             height,
@@ -415,7 +415,6 @@ static const AVOption options[] = {
 
 static const AVClass demuxer_class = {
     .class_name = "APNG demuxer",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
     .category   = AV_CLASS_CATEGORY_DEMUXER,

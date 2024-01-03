@@ -28,6 +28,7 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/common.h"
 #include "libavutil/frame.h"
+#include "libavutil/hwcontext.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
 #include "libavutil/opt.h"
@@ -36,6 +37,7 @@
 #include "audio.h"
 #include "avfilter.h"
 #include "buffersrc.h"
+#include "filters.h"
 #include "formats.h"
 #include "internal.h"
 #include "video.h"
@@ -49,6 +51,8 @@ typedef struct BufferSourceContext {
     /* video only */
     int               w, h;
     enum AVPixelFormat  pix_fmt;
+    enum AVColorSpace color_space;
+    enum AVColorRange color_range;
     AVRational        pixel_aspect;
 
     AVBufferRef *hw_frames_ctx;
@@ -61,12 +65,16 @@ typedef struct BufferSourceContext {
     AVChannelLayout ch_layout;
 
     int eof;
+    int64_t last_pts;
 } BufferSourceContext;
 
-#define CHECK_VIDEO_PARAM_CHANGE(s, c, width, height, format, pts)\
-    if (c->w != width || c->h != height || c->pix_fmt != format) {\
-        av_log(s, AV_LOG_INFO, "filter context - w: %d h: %d fmt: %d, incoming frame - w: %d h: %d fmt: %d pts_time: %s\n",\
-               c->w, c->h, c->pix_fmt, width, height, format, av_ts2timestr(pts, &s->outputs[0]->time_base));\
+#define CHECK_VIDEO_PARAM_CHANGE(s, c, width, height, format, csp, range, pts)\
+    if (c->w != width || c->h != height || c->pix_fmt != format ||\
+        c->color_space != csp || c->color_range != range) {\
+        av_log(s, AV_LOG_INFO, "filter context - w: %d h: %d fmt: %d csp: %s range: %s, incoming frame - w: %d h: %d fmt: %d csp: %s range: %s pts_time: %s\n",\
+               c->w, c->h, c->pix_fmt, av_color_space_name(c->color_space), av_color_range_name(c->color_range),\
+               width, height, format, av_color_space_name(csp), av_color_range_name(range),\
+               av_ts2timestr(pts, &s->outputs[0]->time_base));\
         av_log(s, AV_LOG_WARNING, "Changing video frame properties on the fly is not supported by all filters.\n");\
     }
 
@@ -87,6 +95,8 @@ AVBufferSrcParameters *av_buffersrc_parameters_alloc(void)
         return NULL;
 
     par->format = -1;
+    par->color_range = AVCOL_RANGE_UNSPECIFIED;
+    par->color_space = AVCOL_SPC_UNSPECIFIED;
 
     return par;
 }
@@ -117,6 +127,10 @@ int av_buffersrc_parameters_set(AVFilterContext *ctx, AVBufferSrcParameters *par
             if (!s->hw_frames_ctx)
                 return AVERROR(ENOMEM);
         }
+        if (param->color_space != AVCOL_SPC_UNSPECIFIED)
+            s->color_space = param->color_space;
+        if (param->color_range != AVCOL_RANGE_UNSPECIFIED)
+            s->color_range = param->color_range;
         break;
     case AVMEDIA_TYPE_AUDIO:
         if (param->format != AV_SAMPLE_FMT_NONE) {
@@ -191,9 +205,11 @@ FF_ENABLE_DEPRECATION_WARNINGS
     s->nb_failed_requests = 0;
 
     if (!frame)
-        return av_buffersrc_close(ctx, AV_NOPTS_VALUE, flags);
+        return av_buffersrc_close(ctx, s->last_pts, flags);
     if (s->eof)
-        return AVERROR(EINVAL);
+        return AVERROR_EOF;
+
+    s->last_pts = frame->pts + frame->duration;
 
     refcounted = !!frame->buf[0];
 
@@ -202,7 +218,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
         switch (ctx->outputs[0]->type) {
         case AVMEDIA_TYPE_VIDEO:
             CHECK_VIDEO_PARAM_CHANGE(ctx, s, frame->width, frame->height,
-                                     frame->format, frame->pts);
+                                     frame->format, frame->colorspace,
+                                     frame->color_range, frame->pts);
             break;
         case AVMEDIA_TYPE_AUDIO:
             /* For layouts unknown on input but known on link after negotiation. */
@@ -227,23 +244,36 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
     }
 
-    if (!(copy = av_frame_alloc()))
-        return AVERROR(ENOMEM);
-
     if (refcounted && !(flags & AV_BUFFERSRC_FLAG_KEEP_REF)) {
+        if (!(copy = av_frame_alloc()))
+            return AVERROR(ENOMEM);
         av_frame_move_ref(copy, frame);
     } else {
-        ret = av_frame_ref(copy, frame);
-        if (ret < 0) {
-            av_frame_free(&copy);
-            return ret;
-        }
+        copy = av_frame_clone(frame);
+        if (!copy)
+            return AVERROR(ENOMEM);
     }
 
 #if FF_API_PKT_DURATION
 FF_DISABLE_DEPRECATION_WARNINGS
     if (copy->pkt_duration && copy->pkt_duration != copy->duration)
         copy->duration = copy->pkt_duration;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+
+#if FF_API_INTERLACED_FRAME
+FF_DISABLE_DEPRECATION_WARNINGS
+    if (copy->interlaced_frame)
+        copy->flags |= AV_FRAME_FLAG_INTERLACED;
+    if (copy->top_field_first)
+        copy->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+
+#if FF_API_FRAME_KEY
+FF_DISABLE_DEPRECATION_WARNINGS
+    if (copy->key_frame)
+        copy->flags |= AV_FRAME_FLAG_KEY;
 FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
@@ -286,10 +316,11 @@ static av_cold int init_video(AVFilterContext *ctx)
         return AVERROR(EINVAL);
     }
 
-    av_log(ctx, AV_LOG_VERBOSE, "w:%d h:%d pixfmt:%s tb:%d/%d fr:%d/%d sar:%d/%d\n",
+    av_log(ctx, AV_LOG_VERBOSE, "w:%d h:%d pixfmt:%s tb:%d/%d fr:%d/%d sar:%d/%d csp:%s range:%s\n",
            c->w, c->h, av_get_pix_fmt_name(c->pix_fmt),
            c->time_base.num, c->time_base.den, c->frame_rate.num, c->frame_rate.den,
-           c->pixel_aspect.num, c->pixel_aspect.den);
+           c->pixel_aspect.num, c->pixel_aspect.den,
+           av_color_space_name(c->color_space), av_color_range_name(c->color_range));
 
     return 0;
 }
@@ -312,6 +343,30 @@ static const AVOption buffer_options[] = {
     { "pixel_aspect",  "sample aspect ratio",    OFFSET(pixel_aspect),     AV_OPT_TYPE_RATIONAL, { .dbl = 0 }, 0, DBL_MAX, V },
     { "time_base",     NULL,                     OFFSET(time_base),        AV_OPT_TYPE_RATIONAL, { .dbl = 0 }, 0, DBL_MAX, V },
     { "frame_rate",    NULL,                     OFFSET(frame_rate),       AV_OPT_TYPE_RATIONAL, { .dbl = 0 }, 0, DBL_MAX, V },
+    { "colorspace", "select colorspace", OFFSET(color_space), AV_OPT_TYPE_INT, {.i64=AVCOL_SPC_UNSPECIFIED}, 0, AVCOL_SPC_NB-1, V, "colorspace"},
+    {   "gbr",         NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_RGB},               INT_MIN, INT_MAX, V, "colorspace"},
+    {   "bt709",       NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_BT709},             INT_MIN, INT_MAX, V, "colorspace"},
+    {   "unknown",     NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_UNSPECIFIED},       INT_MIN, INT_MAX, V, "colorspace"},
+    {   "fcc",         NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_FCC},               INT_MIN, INT_MAX, V, "colorspace"},
+    {   "bt470bg",     NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_BT470BG},           INT_MIN, INT_MAX, V, "colorspace"},
+    {   "smpte170m",   NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_SMPTE170M},         INT_MIN, INT_MAX, V, "colorspace"},
+    {   "smpte240m",   NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_SMPTE240M},         INT_MIN, INT_MAX, V, "colorspace"},
+    {   "ycgco",       NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_YCGCO},             INT_MIN, INT_MAX, V, "colorspace"},
+    {   "bt2020nc",    NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_BT2020_NCL},        INT_MIN, INT_MAX, V, "colorspace"},
+    {   "bt2020c",     NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_BT2020_CL},         INT_MIN, INT_MAX, V, "colorspace"},
+    {   "smpte2085",   NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_SMPTE2085},         INT_MIN, INT_MAX, V, "colorspace"},
+    {   "chroma-derived-nc",  NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_CHROMA_DERIVED_NCL},INT_MIN, INT_MAX, V, "colorspace"},
+    {   "chroma-derived-c",   NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_CHROMA_DERIVED_CL}, INT_MIN, INT_MAX, V, "colorspace"},
+    {   "ictcp",       NULL,  0, AV_OPT_TYPE_CONST, {.i64=AVCOL_SPC_ICTCP},             INT_MIN, INT_MAX, V, "colorspace"},
+    { "range", "select color range", OFFSET(color_range), AV_OPT_TYPE_INT, {.i64=AVCOL_RANGE_UNSPECIFIED}, 0, AVCOL_RANGE_NB-1, V, "range"},
+    {   "unspecified", NULL,   0, AV_OPT_TYPE_CONST, {.i64=AVCOL_RANGE_UNSPECIFIED},  0, 0, V, "range"},
+    {   "unknown",     NULL,   0, AV_OPT_TYPE_CONST, {.i64=AVCOL_RANGE_UNSPECIFIED},  0, 0, V, "range"},
+    {   "limited",     NULL,   0, AV_OPT_TYPE_CONST, {.i64=AVCOL_RANGE_MPEG},         0, 0, V, "range"},
+    {   "tv",          NULL,   0, AV_OPT_TYPE_CONST, {.i64=AVCOL_RANGE_MPEG},         0, 0, V, "range"},
+    {   "mpeg",        NULL,   0, AV_OPT_TYPE_CONST, {.i64=AVCOL_RANGE_MPEG},         0, 0, V, "range"},
+    {   "full",        NULL,   0, AV_OPT_TYPE_CONST, {.i64=AVCOL_RANGE_JPEG},         0, 0, V, "range"},
+    {   "pc",          NULL,   0, AV_OPT_TYPE_CONST, {.i64=AVCOL_RANGE_JPEG},         0, 0, V, "range"},
+    {   "jpeg",        NULL,   0, AV_OPT_TYPE_CONST, {.i64=AVCOL_RANGE_JPEG},         0, 0, V, "range"},
     { NULL },
 };
 
@@ -409,14 +464,35 @@ static int query_formats(AVFilterContext *ctx)
     AVFilterChannelLayouts *channel_layouts = NULL;
     AVFilterFormats *formats = NULL;
     AVFilterFormats *samplerates = NULL;
+    AVFilterFormats *color_spaces = NULL;
+    AVFilterFormats *color_ranges = NULL;
     int ret;
 
     switch (ctx->outputs[0]->type) {
-    case AVMEDIA_TYPE_VIDEO:
+    case AVMEDIA_TYPE_VIDEO: {
+        enum AVPixelFormat swfmt = c->pix_fmt;
+        if (av_pix_fmt_desc_get(swfmt)->flags & AV_PIX_FMT_FLAG_HWACCEL) {
+            if (!c->hw_frames_ctx) {
+                av_log(ctx, AV_LOG_ERROR, "Setting BufferSourceContext.pix_fmt "
+                       "to a HW format requires hw_frames_ctx to be non-NULL!\n");
+                return AVERROR(EINVAL);
+            }
+            swfmt = ((AVHWFramesContext *) c->hw_frames_ctx->data)->sw_format;
+        }
         if ((ret = ff_add_format         (&formats, c->pix_fmt)) < 0 ||
             (ret = ff_set_common_formats (ctx     , formats   )) < 0)
             return ret;
+        /* force specific colorspace/range downstream only for ordinary YUV */
+        if (ff_fmt_is_regular_yuv(swfmt)) {
+            if ((ret = ff_add_format(&color_spaces, c->color_space)) < 0 ||
+                (ret = ff_set_common_color_spaces(ctx, color_spaces)) < 0)
+                return ret;
+            if ((ret = ff_add_format(&color_ranges, c->color_range)) < 0 ||
+                (ret = ff_set_common_color_ranges(ctx, color_ranges)) < 0)
+                return ret;
+        }
         break;
+    }
     case AVMEDIA_TYPE_AUDIO:
         if ((ret = ff_add_format             (&formats    , c->sample_fmt )) < 0 ||
             (ret = ff_set_common_formats     (ctx         , formats       )) < 0 ||
@@ -468,21 +544,28 @@ static int config_props(AVFilterLink *link)
     return 0;
 }
 
-static int request_frame(AVFilterLink *link)
+static int activate(AVFilterContext *ctx)
 {
-    BufferSourceContext *c = link->src->priv;
+    AVFilterLink *outlink = ctx->outputs[0];
+    BufferSourceContext *c = ctx->priv;
 
-    if (c->eof)
-        return AVERROR_EOF;
+    if (!c->eof && ff_outlink_get_status(outlink)) {
+        c->eof = 1;
+        return 0;
+    }
+
+    if (c->eof) {
+        ff_outlink_set_status(outlink, AVERROR_EOF, c->last_pts);
+        return 0;
+    }
     c->nb_failed_requests++;
-    return AVERROR(EAGAIN);
+    return FFERROR_NOT_READY;
 }
 
 static const AVFilterPad avfilter_vsrc_buffer_outputs[] = {
     {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
-        .request_frame = request_frame,
         .config_props  = config_props,
     },
 };
@@ -491,7 +574,7 @@ const AVFilter ff_vsrc_buffer = {
     .name      = "buffer",
     .description = NULL_IF_CONFIG_SMALL("Buffer video frames, and make them accessible to the filterchain."),
     .priv_size = sizeof(BufferSourceContext),
-
+    .activate  = activate,
     .init      = init_video,
     .uninit    = uninit,
 
@@ -505,7 +588,6 @@ static const AVFilterPad avfilter_asrc_abuffer_outputs[] = {
     {
         .name          = "default",
         .type          = AVMEDIA_TYPE_AUDIO,
-        .request_frame = request_frame,
         .config_props  = config_props,
     },
 };
@@ -514,7 +596,7 @@ const AVFilter ff_asrc_abuffer = {
     .name          = "abuffer",
     .description   = NULL_IF_CONFIG_SMALL("Buffer audio frames, and make them accessible to the filterchain."),
     .priv_size     = sizeof(BufferSourceContext),
-
+    .activate  = activate,
     .init      = init_audio,
     .uninit    = uninit,
 

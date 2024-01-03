@@ -211,6 +211,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_AASC:        maxpixels  /= 1024;  break;
     case AV_CODEC_ID_AGM:         maxpixels  /= 1024;  break;
     case AV_CODEC_ID_ANM:         maxpixels  /= 1024;  break;
+    case AV_CODEC_ID_APE:         maxsamples /= 16384; break;
     case AV_CODEC_ID_ARBC:        maxpixels  /= 1024;  break;
     case AV_CODEC_ID_ARGO:        maxpixels  /= 1024;  break;
     case AV_CODEC_ID_BETHSOFTVID: maxpixels  /= 8192;  break;
@@ -220,6 +221,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_CFHD:        maxpixels  /= 16384; break;
     case AV_CODEC_ID_CINEPAK:     maxpixels  /= 128;   break;
     case AV_CODEC_ID_COOK:        maxsamples /= 1<<20; break;
+    case AV_CODEC_ID_CSCD:        maxpixels  /= 1024;  break;
     case AV_CODEC_ID_DFA:         maxpixels  /= 1024;  break;
     case AV_CODEC_ID_DIRAC:       maxpixels  /= 8192;  break;
     case AV_CODEC_ID_DSICINVIDEO: maxpixels  /= 1024;  break;
@@ -227,11 +229,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_DVB_SUBTITLE: av_dict_set_int(&opts, "compute_clut", -2, 0); break;
     case AV_CODEC_ID_DXA:         maxpixels  /= 32;    break;
     case AV_CODEC_ID_DXV:         maxpixels  /= 32;    break;
+    case AV_CODEC_ID_EXR:         maxpixels  /= 1024;  break;
     case AV_CODEC_ID_FFV1:        maxpixels  /= 32;    break;
     case AV_CODEC_ID_FFWAVESYNTH: maxsamples /= 16384; break;
     case AV_CODEC_ID_FLAC:        maxsamples /= 1024;  break;
     case AV_CODEC_ID_FLIC:        maxpixels  /= 1024;  break;
     case AV_CODEC_ID_FLV1:        maxpixels  /= 1024;  break;
+    case AV_CODEC_ID_FMVC:        maxpixels  /= 1024;  break;
     case AV_CODEC_ID_G2M:         maxpixels  /= 1024;  break;
     case AV_CODEC_ID_GEM:         maxpixels  /= 512;   break;
     case AV_CODEC_ID_GDV:         maxpixels  /= 512;   break;
@@ -258,6 +262,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_MSZH:        maxpixels  /= 128;   break;
     case AV_CODEC_ID_MTS2:        maxpixels  /= 4096;  break;
     case AV_CODEC_ID_MVC2:        maxpixels  /= 128;   break;
+    case AV_CODEC_ID_MVHA:        maxpixels  /= 16384; break;
     case AV_CODEC_ID_MVDV:        maxpixels  /= 1024;  break;
     case AV_CODEC_ID_MWSC:        maxpixels  /= 256;   break;
     case AV_CODEC_ID_MXPEG:       maxpixels  /= 128;   break;
@@ -268,12 +273,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_QTRLE:       maxpixels  /= 16;    break;
     case AV_CODEC_ID_PAF_VIDEO:   maxpixels  /= 16;    break;
     case AV_CODEC_ID_PRORES:      maxpixels  /= 256;   break;
+    case AV_CODEC_ID_QPEG:        maxpixels  /= 256;   break;
+    case AV_CODEC_ID_RKA:         maxsamples /= 65536; break;
     case AV_CODEC_ID_RSCC:        maxpixels  /= 256;   break;
     case AV_CODEC_ID_RASC:        maxpixels  /= 16;    break;
+    case AV_CODEC_ID_RTV1:        maxpixels  /= 16;    break;
     case AV_CODEC_ID_SANM:        maxpixels  /= 16;    break;
     case AV_CODEC_ID_SCPR:        maxpixels  /= 32;    break;
     case AV_CODEC_ID_SCREENPRESSO:maxpixels  /= 64;    break;
     case AV_CODEC_ID_SIMBIOSIS_IMX:maxpixels /= 16384; break;
+    case AV_CODEC_ID_SPEEX:       maxsamples /= 128;   break;
     case AV_CODEC_ID_SMACKAUDIO:  maxsamples /= 4096;  break;
     case AV_CODEC_ID_SMACKVIDEO:  maxpixels  /= 64;    break;
     case AV_CODEC_ID_SNOW:        maxpixels  /= 128;   break;
@@ -290,10 +299,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_VC1IMAGE:    maxpixels  /= 8192;  break;
     case AV_CODEC_ID_VMNC:        maxpixels  /= 8192;  break;
     case AV_CODEC_ID_VMDVIDEO:    maxpixels  /= 1024;  break;
+    case AV_CODEC_ID_VMIX:        maxpixels  /= 8192;  break;
     case AV_CODEC_ID_VP3:         maxpixels  /= 4096;  break;
     case AV_CODEC_ID_VP4:         maxpixels  /= 4096;  break;
     case AV_CODEC_ID_VP5:         maxpixels  /= 256;   break;
     case AV_CODEC_ID_VP6F:        maxpixels  /= 4096;  break;
+    case AV_CODEC_ID_VP6A:        maxpixels  /= 4096;  break;
     case AV_CODEC_ID_VP7:         maxpixels  /= 256;   break;
     case AV_CODEC_ID_VP9:         maxpixels  /= 4096;  break;
     case AV_CODEC_ID_WAVPACK:     maxsamples /= 1024;  break;
@@ -303,6 +314,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_WMV3:        maxpixels  /= 1024;  break;
     case AV_CODEC_ID_WS_VQA:      maxpixels  /= 16384; break;
     case AV_CODEC_ID_WMALOSSLESS: maxsamples /= 1024;  break;
+    case AV_CODEC_ID_WMAPRO:      maxsamples /= 16384; break;
     case AV_CODEC_ID_YLC:         maxpixels  /= 1024;  break;
     case AV_CODEC_ID_ZEROCODEC:   maxpixels  /= 128;   break;
     case AV_CODEC_ID_ZLIB:        maxpixels  /= 4096;  break;
@@ -423,6 +435,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             ctx->err_recognition |= AV_EF_CRCCHECK;
 
         ctx->workaround_bugs = bytestream2_get_le32(&gbc);
+
+        if (c->p.max_lowres) {
+            ctx->lowres = bytestream2_get_byte(&gbc) % (c->p.max_lowres+1);
+        }
 
         if (extradata_size < size) {
             ctx->extradata = av_mallocz(extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);

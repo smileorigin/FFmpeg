@@ -33,6 +33,13 @@
 #include "internal.h"
 #include "video.h"
 
+const AVFilterPad ff_video_default_filterpad[1] = {
+    {
+        .name = "default",
+        .type = AVMEDIA_TYPE_VIDEO,
+    }
+};
+
 AVFrame *ff_null_get_video_buffer(AVFilterLink *link, int w, int h)
 {
     return ff_get_video_buffer(link->dst->outputs[0], w, h);
@@ -89,6 +96,8 @@ AVFrame *ff_default_get_video_buffer2(AVFilterLink *link, int w, int h, int alig
         return NULL;
 
     frame->sample_aspect_ratio = link->sample_aspect_ratio;
+    frame->colorspace  = link->colorspace;
+    frame->color_range = link->color_range;
 
     return frame;
 }

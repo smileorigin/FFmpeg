@@ -31,6 +31,7 @@
  * ported by Clément Bœsch for FFmpeg.
  */
 
+#include "libavutil/emms.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
@@ -38,6 +39,7 @@
 #include "internal.h"
 #include "qp_table.h"
 #include "vf_spp.h"
+#include "video.h"
 
 enum mode {
     MODE_HARD,
@@ -73,7 +75,6 @@ static const AVOption spp_options[] = {
 
 static const AVClass spp_class = {
     .class_name       = "spp",
-    .item_name        = av_default_item_name,
     .option           = spp_options,
     .version          = LIBAVUTIL_VERSION_INT,
     .category         = AV_CLASS_CATEGORY_FILTER,
@@ -484,13 +485,6 @@ static const AVFilterPad spp_inputs[] = {
     },
 };
 
-static const AVFilterPad spp_outputs[] = {
-    {
-        .name = "default",
-        .type = AVMEDIA_TYPE_VIDEO,
-    },
-};
-
 const AVFilter ff_vf_spp = {
     .name            = "spp",
     .description     = NULL_IF_CONFIG_SMALL("Apply a simple post processing filter."),
@@ -498,7 +492,7 @@ const AVFilter ff_vf_spp = {
     .preinit         = preinit,
     .uninit          = uninit,
     FILTER_INPUTS(spp_inputs),
-    FILTER_OUTPUTS(spp_outputs),
+    FILTER_OUTPUTS(ff_video_default_filterpad),
     FILTER_PIXFMTS_ARRAY(pix_fmts),
     .process_command = process_command,
     .priv_class      = &spp_class,

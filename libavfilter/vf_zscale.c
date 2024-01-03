@@ -132,12 +132,6 @@ typedef struct ZScaleContext {
     zimg_graph_builder_params alpha_params, params;
     zimg_graph_builder_params alpha_params_tmp, params_tmp;
     zimg_filter_graph *alpha_graph[MAX_THREADS], *graph[MAX_THREADS];
-
-    enum AVColorSpace in_colorspace, out_colorspace;
-    enum AVColorTransferCharacteristic in_trc, out_trc;
-    enum AVColorPrimaries in_primaries, out_primaries;
-    enum AVColorRange in_range, out_range;
-    enum AVChromaLocation in_chromal, out_chromal;
 } ZScaleContext;
 
 typedef struct ThreadData {
@@ -193,8 +187,12 @@ static av_cold int init(AVFilterContext *ctx)
     return 0;
 }
 
+static enum AVColorRange convert_range_from_zimg(enum zimg_pixel_range_e color_range);
+
 static int query_formats(AVFilterContext *ctx)
 {
+    ZScaleContext *s = ctx->priv;
+    AVFilterFormats *formats;
     static const enum AVPixelFormat pixel_fmts[] = {
         AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
         AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
@@ -210,10 +208,11 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUVA420P, AV_PIX_FMT_YUVA422P, AV_PIX_FMT_YUVA444P,
         AV_PIX_FMT_YUVA420P9, AV_PIX_FMT_YUVA422P9, AV_PIX_FMT_YUVA444P9,
         AV_PIX_FMT_YUVA420P10, AV_PIX_FMT_YUVA422P10, AV_PIX_FMT_YUVA444P10,
+        AV_PIX_FMT_YUVA444P12, AV_PIX_FMT_YUVA422P12,
         AV_PIX_FMT_YUVA420P16, AV_PIX_FMT_YUVA422P16, AV_PIX_FMT_YUVA444P16,
         AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRP9, AV_PIX_FMT_GBRP10,
         AV_PIX_FMT_GBRP12, AV_PIX_FMT_GBRP14, AV_PIX_FMT_GBRP16,
-        AV_PIX_FMT_GBRAP, AV_PIX_FMT_GBRAP16,
+        AV_PIX_FMT_GBRAP, AV_PIX_FMT_GBRAP10, AV_PIX_FMT_GBRAP12, AV_PIX_FMT_GBRAP14, AV_PIX_FMT_GBRAP16,
         AV_PIX_FMT_GBRPF32, AV_PIX_FMT_GBRAPF32,
         AV_PIX_FMT_NONE
     };
@@ -222,7 +221,27 @@ static int query_formats(AVFilterContext *ctx)
     ret = ff_formats_ref(ff_make_format_list(pixel_fmts), &ctx->inputs[0]->outcfg.formats);
     if (ret < 0)
         return ret;
-    return ff_formats_ref(ff_make_format_list(pixel_fmts), &ctx->outputs[0]->incfg.formats);
+    ret = ff_formats_ref(ff_make_format_list(pixel_fmts), &ctx->outputs[0]->incfg.formats);
+    if (ret < 0)
+        return ret;
+
+    if ((ret = ff_formats_ref(ff_all_color_spaces(), &ctx->inputs[0]->outcfg.formats)) < 0 ||
+        (ret = ff_formats_ref(ff_all_color_ranges(), &ctx->inputs[0]->outcfg.formats)) < 0)
+        return ret;
+
+    formats = s->colorspace != ZIMG_MATRIX_UNSPECIFIED && s->colorspace > 0
+        ? ff_make_formats_list_singleton(s->colorspace)
+        : ff_all_color_spaces();
+    if ((ret = ff_formats_ref(formats, &ctx->outputs[0]->incfg.formats)) < 0)
+        return ret;
+
+    formats = s->range != -1
+        ? ff_make_formats_list_singleton(convert_range_from_zimg(s->range))
+        : ff_all_color_ranges();
+    if ((ret = ff_formats_ref(formats, &ctx->outputs[0]->incfg.formats)) < 0)
+        return ret;
+
+    return 0;
 }
 
 static void slice_params(ZScaleContext *s, int out_h, int in_h)
@@ -683,14 +702,8 @@ fail:
 
 static void update_output_color_information(ZScaleContext *s, AVFrame *frame)
 {
-    if (s->colorspace != -1)
-        frame->colorspace = (int)s->dst_format.matrix_coefficients;
-
     if (s->primaries != -1)
         frame->color_primaries = (int)s->dst_format.color_primaries;
-
-    if (s->range != -1)
-        frame->color_range = convert_range_from_zimg(s->dst_format.pixel_range);
 
     if (s->trc != -1)
         frame->color_trc = (int)s->dst_format.transfer_characteristics;
@@ -780,6 +793,8 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
     if ((link->format != outlink->format) ||
         (link->w != outlink->w) ||
         (link->h != outlink->h) ||
+        (link->colorspace != outlink->colorspace) ||
+        (link->color_range != outlink->color_range) ||
         s->first_time ||
         (s->src_format.chroma_location != s->dst_format.chroma_location) ||
         (s->src_format.color_family !=s->dst_format.color_family) ||
@@ -801,6 +816,8 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
             goto fail;
 
         av_frame_copy_props(out, in);
+        out->colorspace = outlink->colorspace;
+        out->color_range = outlink->color_range;
 
         if ((ret = realign_frame(desc, &in, 1)) < 0)
             goto fail;
@@ -810,20 +827,13 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
         snprintf(buf, sizeof(buf)-1, "%d", outlink->h);
         av_opt_set(s, "h", buf, 0);
 
-        link->dst->inputs[0]->format = in->format;
-        link->dst->inputs[0]->w      = in->width;
-        link->dst->inputs[0]->h      = in->height;
+        link->dst->inputs[0]->format      = in->format;
+        link->dst->inputs[0]->w           = in->width;
+        link->dst->inputs[0]->h           = in->height;
+        link->dst->inputs[0]->colorspace  = in->colorspace;
+        link->dst->inputs[0]->color_range = in->color_range;
 
         s->nb_threads = av_clip(FFMIN(ff_filter_get_nb_threads(ctx), FFMIN(link->h, outlink->h) / MIN_TILESIZE), 1, MAX_THREADS);
-        s->in_colorspace = in->colorspace;
-        s->in_trc = in->color_trc;
-        s->in_primaries = in->color_primaries;
-        s->in_range = in->color_range;
-        s->out_colorspace = out->colorspace;
-        s->out_trc = out->color_trc;
-        s->out_primaries = out->color_primaries;
-        s->out_range = out->color_range;
-
         slice_params(s, out->height, in->height);
 
         zimg_image_format_default(&s->src_format, ZIMG_API_VERSION);
@@ -900,14 +910,22 @@ static int filter_frame(AVFilterLink *link, AVFrame *in)
             int x, y;
             if (odesc->flags & AV_PIX_FMT_FLAG_FLOAT) {
                 for (y = 0; y < out->height; y++) {
+                    const ptrdiff_t row =  y * out->linesize[3];
                     for (x = 0; x < out->width; x++) {
-                        AV_WN32(out->data[3] + x * odesc->comp[3].step + y * out->linesize[3],
+                        AV_WN32(out->data[3] + x * odesc->comp[3].step + row,
                                 av_float2int(1.0f));
                     }
                 }
-            } else {
+            } else if (s->dst_format.depth == 8) {
                 for (y = 0; y < outlink->h; y++)
                     memset(out->data[3] + y * out->linesize[3], 0xff, outlink->w);
+            } else {
+                const uint16_t max = (1 << s->dst_format.depth) - 1;
+                for (y = 0; y < outlink->h; y++) {
+                    const ptrdiff_t row =  y * out->linesize[3];
+                    for (x = 0; x < out->width; x++)
+                        AV_WN16(out->data[3] + x * odesc->comp[3].step + row, max);
+                }
             }
         }
     } else {

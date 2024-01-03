@@ -233,7 +233,6 @@ static const AVOption options[] = {
 #define M2MDEC_CLASS(NAME) \
     static const AVClass v4l2_m2m_ ## NAME ## _dec_class = { \
         .class_name = #NAME "_v4l2m2m_decoder", \
-        .item_name  = av_default_item_name, \
         .option     = options, \
         .version    = LIBAVUTIL_VERSION_INT, \
     };
@@ -253,7 +252,7 @@ static const AVOption options[] = {
         .bsfs           = bsf_name, \
         .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
         .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE | \
-                          FF_CODEC_CAP_SETS_PKT_DTS | FF_CODEC_CAP_INIT_CLEANUP, \
+                          FF_CODEC_CAP_INIT_CLEANUP, \
         .p.wrapper_name = "v4l2m2m", \
     }
 

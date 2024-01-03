@@ -32,6 +32,7 @@
 #include <X11/extensions/Xvlib.h>
 #include <sys/shm.h>
 
+#include "libavutil/frame.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/imgutils.h"
@@ -314,8 +315,8 @@ static int write_picture(AVFormatContext *s, uint8_t *input_data[4],
         }
     }
 
-    av_image_copy(data, img->pitches, (const uint8_t **)input_data, linesize,
-                  xv->image_format, img->width, img->height);
+    av_image_copy2(data, img->pitches, input_data, linesize,
+                   xv->image_format, img->width, img->height);
     return xv_repaint(s);
 }
 
@@ -370,7 +371,6 @@ static const AVOption options[] = {
 
 static const AVClass xv_class = {
     .class_name = "xvideo outdev",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
     .category   = AV_CLASS_CATEGORY_DEVICE_VIDEO_OUTPUT,

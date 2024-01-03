@@ -36,7 +36,6 @@
 
 static const AVClass vorbis_parser_class = {
     .class_name = "Vorbis parser",
-    .item_name  = av_default_item_name,
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
@@ -234,7 +233,8 @@ int av_vorbis_parse_frame_flags(AVVorbisParseContext *s, const uint8_t *buf,
             else if (buf[0] == 5)
                 *flags |= VORBIS_FLAG_SETUP;
             else
-                goto bad_packet;
+                av_log(s, AV_LOG_VERBOSE, "Ignoring packet with unknown type %u\n",
+                       buf[0]);
 
             /* Special packets have no duration. */
             return 0;

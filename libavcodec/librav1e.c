@@ -219,10 +219,15 @@ static av_cold int librav1e_encode_init(AVCodecContext *avctx)
                                    avctx->framerate.den, avctx->framerate.num
                                    });
     } else {
+FF_DISABLE_DEPRECATION_WARNINGS
         rav1e_config_set_time_base(cfg, (RaRational) {
-                                   avctx->time_base.num * avctx->ticks_per_frame,
-                                   avctx->time_base.den
+                                   avctx->time_base.num
+#if FF_API_TICKS_PER_FRAME
+                                   * avctx->ticks_per_frame
+#endif
+                                   , avctx->time_base.den
                                    });
+FF_ENABLE_DEPRECATION_WARNINGS
     }
 
     if ((avctx->flags & AV_CODEC_FLAG_PASS1 || avctx->flags & AV_CODEC_FLAG_PASS2) && !avctx->bit_rate) {
@@ -662,7 +667,6 @@ const enum AVPixelFormat librav1e_pix_fmts[] = {
 
 static const AVClass class = {
     .class_name = "librav1e",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

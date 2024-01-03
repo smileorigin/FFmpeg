@@ -62,6 +62,7 @@ typedef struct AviSynthLibrary {
     AVSC_DECLARE_FUNC(avs_create_script_environment);
     AVSC_DECLARE_FUNC(avs_delete_script_environment);
     AVSC_DECLARE_FUNC(avs_get_audio);
+    AVSC_DECLARE_FUNC(avs_get_channel_mask);
     AVSC_DECLARE_FUNC(avs_get_error);
     AVSC_DECLARE_FUNC(avs_get_frame);
     AVSC_DECLARE_FUNC(avs_get_version);
@@ -157,6 +158,7 @@ static av_cold int avisynth_load_library(void)
     LOAD_AVS_FUNC(avs_create_script_environment, 0);
     LOAD_AVS_FUNC(avs_delete_script_environment, 0);
     LOAD_AVS_FUNC(avs_get_audio, 0);
+    LOAD_AVS_FUNC(avs_get_channel_mask, 1);
     LOAD_AVS_FUNC(avs_get_error, 1); // New to AviSynth 2.6
     LOAD_AVS_FUNC(avs_get_frame, 0);
     LOAD_AVS_FUNC(avs_get_version, 0);
@@ -793,6 +795,10 @@ static int avisynth_create_stream_audio(AVFormatContext *s, AVStream *st)
     st->duration                        = avs->vi->num_audio_samples;
     avpriv_set_pts_info(st, 64, 1, avs->vi->audio_samples_per_second);
 
+    if (avs_library.avs_get_version(avs->clip) >= 10)
+        av_channel_layout_from_mask(&st->codecpar->ch_layout,
+                                    avs_library.avs_get_channel_mask(avs->vi));
+
     switch (avs->vi->sample_type) {
     case AVS_SAMPLE_INT8:
         st->codecpar->codec_id = AV_CODEC_ID_PCM_U8;
@@ -1186,7 +1192,6 @@ static const AVOption avisynth_options[] = {
 
 static const AVClass avisynth_demuxer_class = {
     .class_name = "AviSynth demuxer",
-    .item_name  = av_default_item_name,
     .option     = avisynth_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

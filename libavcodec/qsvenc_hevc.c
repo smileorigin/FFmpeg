@@ -368,7 +368,6 @@ static const AVOption options[] = {
 
 static const AVClass class = {
     .class_name = "hevc_qsv encoder",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -376,7 +375,7 @@ static const AVClass class = {
 static const FFCodecDefault qsv_enc_defaults[] = {
     { "b",         "1M"    },
     { "refs",      "0"     },
-    { "g",         "-1"    },
+    { "g",         "248"   },
     { "bf",        "-1"    },
     { "qmin",      "-1"    },
     { "qmax",      "-1"    },

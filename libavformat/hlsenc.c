@@ -23,14 +23,9 @@
 #include "config.h"
 #include "config_components.h"
 #include <stdint.h>
+#include <time.h>
 #if HAVE_UNISTD_H
 #include <unistd.h>
-#endif
-
-#if CONFIG_GCRYPT
-#include <gcrypt.h>
-#elif CONFIG_OPENSSL
-#include <openssl/rand.h>
 #endif
 
 #include "libavutil/avassert.h"
@@ -40,10 +35,11 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/opt.h"
 #include "libavutil/log.h"
+#include "libavutil/random_seed.h"
 #include "libavutil/time.h"
 #include "libavutil/time_internal.h"
 
-#include "libavcodec/avcodec.h"
+#include "libavcodec/defs.h"
 
 #include "avformat.h"
 #include "avio_internal.h"
@@ -55,6 +51,7 @@
 #include "internal.h"
 #include "mux.h"
 #include "os_support.h"
+#include "url.h"
 
 typedef enum {
     HLS_START_SEQUENCE_AS_START_NUMBER = 0,
@@ -355,20 +352,30 @@ static void write_codec_attr(AVStream *st, VariantStream *vs)
 
     if (st->codecpar->codec_id == AV_CODEC_ID_H264) {
         uint8_t *data = st->codecpar->extradata;
-        if (data && (data[0] | data[1] | data[2]) == 0 && data[3] == 1 && (data[4] & 0x1F) == 7) {
+        if (data) {
+            const uint8_t *p;
+
+            if (AV_RB32(data) == 0x01 && (data[4] & 0x1F) == 7)
+                p = &data[5];
+            else if (AV_RB24(data) == 0x01 && (data[3] & 0x1F) == 7)
+                p = &data[4];
+            else if (data[0] == 0x01)  /* avcC */
+                p = &data[1];
+            else
+                goto fail;
             snprintf(attr, sizeof(attr),
-                     "avc1.%02x%02x%02x", data[5], data[6], data[7]);
+                     "avc1.%02x%02x%02x", p[0], p[1], p[2]);
         } else {
             goto fail;
         }
     } else if (st->codecpar->codec_id == AV_CODEC_ID_HEVC) {
         uint8_t *data = st->codecpar->extradata;
-        int profile = FF_PROFILE_UNKNOWN;
-        int level = FF_LEVEL_UNKNOWN;
+        int profile = AV_PROFILE_UNKNOWN;
+        int level = AV_LEVEL_UNKNOWN;
 
-        if (st->codecpar->profile != FF_PROFILE_UNKNOWN)
+        if (st->codecpar->profile != AV_PROFILE_UNKNOWN)
             profile = st->codecpar->profile;
-        if (st->codecpar->level != FF_LEVEL_UNKNOWN)
+        if (st->codecpar->level != AV_LEVEL_UNKNOWN)
             level = st->codecpar->level;
 
         /* check the boundary of data which from current position is small than extradata_size */
@@ -401,8 +408,8 @@ static void write_codec_attr(AVStream *st, VariantStream *vs)
             data++;
         }
         if (st->codecpar->codec_tag == MKTAG('h','v','c','1') &&
-            profile != FF_PROFILE_UNKNOWN &&
-            level != FF_LEVEL_UNKNOWN) {
+            profile != AV_PROFILE_UNKNOWN &&
+            level != AV_LEVEL_UNKNOWN) {
             snprintf(attr, sizeof(attr), "%s.%d.4.L%d.B01", av_fourcc2str(st->codecpar->codec_tag), profile, level);
         } else
             goto fail;
@@ -700,20 +707,6 @@ fail:
     return ret;
 }
 
-static int randomize(uint8_t *buf, int len)
-{
-#if CONFIG_GCRYPT
-    gcry_randomize(buf, len, GCRY_VERY_STRONG_RANDOM);
-    return 0;
-#elif CONFIG_OPENSSL
-    if (RAND_bytes(buf, len))
-        return 0;
-#else
-    return AVERROR(ENOSYS);
-#endif
-    return AVERROR(EINVAL);
-}
-
 static int do_encrypt(AVFormatContext *s, VariantStream *vs)
 {
     HLSContext *hls = s->priv_data;
@@ -765,7 +758,7 @@ static int do_encrypt(AVFormatContext *s, VariantStream *vs)
     if (!*hls->key_string) {
         AVDictionary *options = NULL;
         if (!hls->key) {
-            if ((ret = randomize(key, sizeof(key))) < 0) {
+            if ((ret = av_random_bytes(key, sizeof(key))) < 0) {
                 av_log(s, AV_LOG_ERROR, "Cannot generate a strong random key\n");
                 return ret;
             }
@@ -1005,7 +998,7 @@ static int sls_flags_filename_process(struct AVFormatContext *s, HLSContext *hls
                                              't',  (int64_t)round(duration * HLS_MICROSECOND_UNIT)) < 1) {
                 av_log(hls, AV_LOG_ERROR,
                        "Invalid second level segment filename template '%s', "
-                       "you can try to remove second_level_segment_time flag\n",
+                       "you can try to remove second_level_segment_duration flag\n",
                        vs->avf->url);
                 av_freep(&filename);
                 return AVERROR(EINVAL);
@@ -1098,7 +1091,7 @@ static int sls_flag_use_localtime_filename(AVFormatContext *oc, HLSContext *c, V
             char *filename = NULL;
             if (replace_int_data_in_filename(&filename, oc->url, 't', 0) < 1) {
                 av_log(c, AV_LOG_ERROR, "Invalid second level segment filename template '%s', "
-                        "you can try to remove second_level_segment_time flag\n",
+                        "you can try to remove second_level_segment_duration flag\n",
                        oc->url);
                 av_freep(&filename);
                 return AVERROR(EINVAL);
@@ -1360,16 +1353,17 @@ static const char* get_relative_url(const char *master_url, const char *media_ur
 
 static int64_t get_stream_bit_rate(AVStream *stream)
 {
-    AVCPBProperties *props = (AVCPBProperties*)av_stream_get_side_data(
-        stream,
-        AV_PKT_DATA_CPB_PROPERTIES,
-        NULL
+    const AVPacketSideData *sd = av_packet_side_data_get(
+        stream->codecpar->coded_side_data, stream->codecpar->nb_coded_side_data,
+        AV_PKT_DATA_CPB_PROPERTIES
     );
 
     if (stream->codecpar->bit_rate)
         return stream->codecpar->bit_rate;
-    else if (props)
+    else if (sd) {
+        AVCPBProperties *props = (AVCPBProperties*)sd->data;
         return props->max_bitrate;
+    }
 
     return 0;
 }
@@ -1392,6 +1386,7 @@ static int create_master_playlist(AVFormatContext *s,
     int is_file_proto = proto && !strcmp(proto, "file");
     int use_temp_file = is_file_proto && ((hls->flags & HLS_TEMP_FILE) || hls->master_publish_rate);
     char temp_filename[MAX_URL_SIZE];
+    int nb_channels;
 
     input_vs->m3u8_created = 1;
     if (!hls->master_m3u8_created) {
@@ -1440,8 +1435,13 @@ static int create_master_playlist(AVFormatContext *s,
             av_log(s, AV_LOG_ERROR, "Unable to find relative URL\n");
             goto fail;
         }
+        nb_channels = 0;
+        for (j = 0; j < vs->nb_streams; j++)
+            if (vs->streams[j]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
+                if (vs->streams[j]->codecpar->ch_layout.nb_channels > nb_channels)
+                    nb_channels = vs->streams[j]->codecpar->ch_layout.nb_channels;
 
-        ff_hls_write_audio_rendition(hls->m3u8_out, vs->agroup, m3u8_rel_name, vs->language, i, hls->has_default_key ? vs->is_default : 1);
+        ff_hls_write_audio_rendition(hls->m3u8_out, vs->agroup, m3u8_rel_name, vs->language, i, hls->has_default_key ? vs->is_default : 1, nb_channels);
     }
 
     /* For variant streams with video add #EXT-X-STREAM-INF tag with attributes*/
@@ -1587,7 +1587,9 @@ static int hls_window(AVFormatContext *s, int last, VariantStream *vs)
 
     set_http_options(s, &options, hls);
     snprintf(temp_filename, sizeof(temp_filename), use_temp_file ? "%s.tmp" : "%s", vs->m3u8_name);
-    if ((ret = hlsenc_io_open(s, byterange_mode ? &hls->m3u8_out : &vs->out, temp_filename, &options)) < 0) {
+    ret = hlsenc_io_open(s, byterange_mode ? &hls->m3u8_out : &vs->out, temp_filename, &options);
+    av_dict_free(&options);
+    if (ret < 0) {
         if (hls->ignore_io_errors)
             ret = 0;
         goto fail;
@@ -1642,8 +1644,11 @@ static int hls_window(AVFormatContext *s, int last, VariantStream *vs)
         ff_hls_write_end_list(byterange_mode ? hls->m3u8_out : vs->out);
 
     if (vs->vtt_m3u8_name) {
+        set_http_options(vs->vtt_avf, &options, hls);
         snprintf(temp_vtt_filename, sizeof(temp_vtt_filename), use_temp_file ? "%s.tmp" : "%s", vs->vtt_m3u8_name);
-        if ((ret = hlsenc_io_open(s, &hls->sub_m3u8_out, temp_vtt_filename, &options)) < 0) {
+        ret = hlsenc_io_open(s, &hls->sub_m3u8_out, temp_vtt_filename, &options);
+        av_dict_free(&options);
+        if (ret < 0) {
             if (hls->ignore_io_errors)
                 ret = 0;
             goto fail;
@@ -3178,7 +3183,6 @@ static const AVOption options[] = {
 
 static const AVClass hls_class = {
     .class_name = "hls muxer",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -3191,8 +3195,13 @@ const FFOutputFormat ff_hls_muxer = {
     .p.audio_codec    = AV_CODEC_ID_AAC,
     .p.video_codec    = AV_CODEC_ID_H264,
     .p.subtitle_codec = AV_CODEC_ID_WEBVTT,
+#if FF_API_ALLOW_FLUSH
     .p.flags          = AVFMT_NOFILE | AVFMT_GLOBALHEADER | AVFMT_ALLOW_FLUSH | AVFMT_NODIMENSIONS,
+#else
+    .p.flags          = AVFMT_NOFILE | AVFMT_GLOBALHEADER | AVFMT_NODIMENSIONS,
+#endif
     .p.priv_class     = &hls_class,
+    .flags_internal   = FF_FMT_ALLOW_FLUSH,
     .priv_data_size = sizeof(HLSContext),
     .init           = hls_init,
     .write_header   = hls_write_header,

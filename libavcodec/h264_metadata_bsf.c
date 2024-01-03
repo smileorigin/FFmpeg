@@ -26,10 +26,11 @@
 #include "cbs.h"
 #include "cbs_bsf.h"
 #include "cbs_h264.h"
+#include "cbs_sei.h"
 #include "h264.h"
 #include "h264_levels.h"
-#include "h264_sei.h"
 #include "h2645data.h"
+#include "sei.h"
 
 enum {
     FLIP_HORIZONTAL = 1,
@@ -702,7 +703,6 @@ static const AVOption h264_metadata_options[] = {
 
 static const AVClass h264_metadata_class = {
     .class_name = "h264_metadata_bsf",
-    .item_name  = av_default_item_name,
     .option     = h264_metadata_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

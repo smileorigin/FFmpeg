@@ -81,7 +81,9 @@ static int webvtt_read_header(AVFormatContext *s)
         size_t identifier_len, settings_len;
         int64_t ts_start, ts_end;
 
-        ff_subtitles_read_chunk(s->pb, &cue);
+        res = ff_subtitles_read_chunk(s->pb, &cue);
+        if (res < 0)
+            goto end;
 
         if (!cue.len)
             break;
@@ -203,7 +205,6 @@ static const AVOption options[] = {
 
 static const AVClass webvtt_demuxer_class = {
     .class_name  = "WebVTT demuxer",
-    .item_name   = av_default_item_name,
     .option      = options,
     .version     = LIBAVUTIL_VERSION_INT,
 };

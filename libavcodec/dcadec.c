@@ -217,11 +217,10 @@ static int dcadec_decode_frame(AVCodecContext *avctx, AVFrame *frame,
         if (asset && (asset->extension_mask & DCA_EXSS_XLL)) {
             if ((ret = ff_dca_xll_parse(&s->xll, input, asset)) < 0) {
                 // Conceal XLL synchronization error
-                if (ret == AVERROR(EAGAIN)
-                    && (prev_packet & DCA_PACKET_XLL)
-                    && (s->packet & DCA_PACKET_CORE))
-                    s->packet |= DCA_PACKET_XLL | DCA_PACKET_RECOVERY;
-                else if (ret == AVERROR(ENOMEM) || (avctx->err_recognition & AV_EF_EXPLODE))
+                if (ret == AVERROR(EAGAIN)) {
+                    if ((prev_packet & DCA_PACKET_XLL) && (s->packet & DCA_PACKET_CORE))
+                        s->packet |= DCA_PACKET_XLL | DCA_PACKET_RECOVERY;
+                } else if (ret == AVERROR(ENOMEM) || (avctx->err_recognition & AV_EF_EXPLODE))
                     return ret;
             } else {
                 s->packet |= DCA_PACKET_XLL;
@@ -367,12 +366,19 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
     if (s->downmix_layout.nb_channels) {
         if (!av_channel_layout_compare(&s->downmix_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO) ||
-            !av_channel_layout_compare(&s->downmix_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO_DOWNMIX))
+            !av_channel_layout_compare(&s->downmix_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO_DOWNMIX)) {
             s->request_channel_layout = DCA_SPEAKER_LAYOUT_STEREO;
-        else if (!av_channel_layout_compare(&s->downmix_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_5POINT0))
+            av_channel_layout_uninit(&avctx->ch_layout);
+            avctx->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO;
+        } else if (!av_channel_layout_compare(&s->downmix_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_5POINT0)) {
             s->request_channel_layout = DCA_SPEAKER_LAYOUT_5POINT0;
-        else if (!av_channel_layout_compare(&s->downmix_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_5POINT1))
+            av_channel_layout_uninit(&avctx->ch_layout);
+            avctx->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_5POINT0;
+        } else if (!av_channel_layout_compare(&s->downmix_layout, &(AVChannelLayout)AV_CHANNEL_LAYOUT_5POINT1)) {
             s->request_channel_layout = DCA_SPEAKER_LAYOUT_5POINT1;
+            av_channel_layout_uninit(&avctx->ch_layout);
+            avctx->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_5POINT1;
+        }
         else
             av_log(avctx, AV_LOG_WARNING, "Invalid downmix layout\n");
     }
@@ -404,7 +410,6 @@ static const AVOption dcadec_options[] = {
 
 static const AVClass dcadec_class = {
     .class_name = "DCA decoder",
-    .item_name  = av_default_item_name,
     .option     = dcadec_options,
     .version    = LIBAVUTIL_VERSION_INT,
     .category   = AV_CLASS_CATEGORY_DECODER,

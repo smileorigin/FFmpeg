@@ -22,7 +22,6 @@
 
 #include <string.h>
 
-#include "libavutil/avstring.h"
 #include "libavutil/common.h"
 #include "libavutil/cuda_check.h"
 #include "libavutil/hwcontext.h"
@@ -32,10 +31,7 @@
 #include "libavutil/pixdesc.h"
 
 #include "avfilter.h"
-#include "formats.h"
 #include "internal.h"
-#include "scale_eval.h"
-#include "video.h"
 
 #include "cuda/load_helper.h"
 
@@ -396,7 +392,6 @@ static const AVOption options[] = {
 
 static const AVClass cudacolorspace_class = {
     .class_name = "colorspace_cuda",
-    .item_name = av_default_item_name,
     .option = options,
     .version = LIBAVUTIL_VERSION_INT,
 };

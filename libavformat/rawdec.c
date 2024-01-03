@@ -27,8 +27,6 @@
 #include "rawdec.h"
 #include "libavutil/opt.h"
 
-#include "libavcodec/avcodec.h"
-
 #define RAW_PACKET_SIZE 1024
 
 int ff_raw_read_partial_packet(AVFormatContext *s, AVPacket *pkt)
@@ -86,7 +84,7 @@ int ff_raw_video_read_header(AVFormatContext *s)
     st->codecpar->codec_id = s->iformat->raw_codec_id;
     sti->need_parsing = AVSTREAM_PARSE_FULL_RAW;
 
-    sti->avctx->framerate = s1->framerate;
+    st->avg_frame_rate = s1->framerate;
     avpriv_set_pts_info(st, 64, 1, 1200000);
 
 fail:
@@ -128,7 +126,6 @@ static const AVOption rawvideo_options[] = {
 
 const AVClass ff_rawvideo_demuxer_class = {
     .class_name = "generic raw video demuxer",
-    .item_name  = av_default_item_name,
     .option     = rawvideo_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -141,7 +138,6 @@ static const AVOption raw_options[] = {
 
 const AVClass ff_raw_demuxer_class = {
     .class_name = "generic raw demuxer",
-    .item_name  = av_default_item_name,
     .option     = raw_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

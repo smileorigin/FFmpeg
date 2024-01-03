@@ -36,7 +36,8 @@
 #include "avio_internal.h"
 #include "internal.h"
 #include "img2.h"
-#include "jpegxl_probe.h"
+#include "os_support.h"
+#include "libavcodec/jpegxl_parse.h"
 #include "libavcodec/mjpeg.h"
 #include "libavcodec/vbn.h"
 #include "libavcodec/xwd.h"
@@ -633,7 +634,6 @@ const AVOption ff_img_options[] = {
 
 static const AVClass img2_class = {
     .class_name = "image2 demuxer",
-    .item_name  = av_default_item_name,
     .option     = ff_img_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -657,7 +657,6 @@ static const AVOption img2pipe_options[] = {
 };
 static const AVClass imagepipe_class = {
     .class_name = "imagepipe demuxer",
-    .item_name  = av_default_item_name,
     .option     = img2pipe_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -850,7 +849,7 @@ static int jpegxl_probe(const AVProbeData *p)
     if (AV_RL16(b) != FF_JPEGXL_CODESTREAM_SIGNATURE_LE)
         return 0;
 #if CONFIG_IMAGE_JPEGXL_PIPE_DEMUXER
-    if (ff_jpegxl_verify_codestream_header(p->buf, p->buf_size) >= 0)
+    if (ff_jpegxl_parse_codestream_header(p->buf, p->buf_size, NULL, 5) >= 0)
         return AVPROBE_SCORE_MAX - 2;
 #endif
     return 0;

@@ -29,6 +29,7 @@
 #include "config.h"
 
 #include "libavutil/attributes.h"
+#include "libavutil/emms.h"
 #include "libavutil/internal.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
@@ -104,7 +105,9 @@ static av_cold int dvvideo_encode_init(AVCodecContext *avctx)
     ff_fdctdsp_init(&fdsp, avctx);
     ff_me_cmp_init(&mecc, avctx);
     ff_pixblockdsp_init(&pdsp, avctx);
-    ff_set_cmp(&mecc, mecc.ildct_cmp, avctx->ildct_cmp);
+    ret = ff_set_cmp(&mecc, mecc.ildct_cmp, avctx->ildct_cmp);
+    if (ret < 0)
+        return AVERROR(EINVAL);
 
     s->get_pixels = pdsp.get_pixels;
     s->ildct_cmp  = mecc.ildct_cmp[5];
@@ -1046,9 +1049,9 @@ static inline int dv_write_pack(enum DVPackType pack_id, DVEncContext *c,
     int fs;
 
     if (c->avctx->height >= 720)
-        fs = c->avctx->height == 720 || c->frame->top_field_first ? 0x40 : 0x00;
+        fs = c->avctx->height == 720 || (c->frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) ? 0x40 : 0x00;
     else
-        fs = c->frame->top_field_first ? 0x00 : 0x40;
+        fs = (c->frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) ? 0x00 : 0x40;
 
     if (DV_PROFILE_IS_HD(c->sys) ||
         (int)(av_q2d(c->avctx->sample_aspect_ratio) *
@@ -1228,7 +1231,6 @@ static const AVOption dv_options[] = {
 
 static const AVClass dvvideo_encode_class = {
     .class_name = "dvvideo encoder",
-    .item_name  = av_default_item_name,
     .option     = dv_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

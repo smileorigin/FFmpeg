@@ -11,13 +11,22 @@ fate-filter-owdenoise-sample: CMP = oneoff
 FATE_FILTER_SAMPLES-$(call FILTERDEMDEC, PERMS DELOGO, RM, RV30) += fate-filter-delogo
 fate-filter-delogo: CMD = framecrc -i $(TARGET_SAMPLES)/real/rv30.rm -vf perms=random,delogo=show=0:x=290:y=25:w=26:h=16 -an
 
+FATE_BWDIF-$(call FILTERDEMDEC, BWDIF, MPEGTS, MPEG2VIDEO) += fate-filter-bwdif-mode0 fate-filter-bwdif-mode1
+fate-filter-bwdif-mode0: CMD = framecrc -ec 0 -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -frames:v 30 -vf bwdif=send_frame
+fate-filter-bwdif-mode1: CMD = framecrc -ec 0 -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -frames:v 59 -vf bwdif=send_field
+
+FATE_BWDIF-$(call FILTERDEMDEC, BWDIF SCALE, MPEGTS, MPEG2VIDEO) += fate-filter-bwdif10
+fate-filter-bwdif10: CMD = framecrc -ec 0 -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -flags bitexact -pix_fmt yuv420p10le -frames:v 30 -vf scale,bwdif=0
+
+FATE_FILTER_SAMPLES-yes += $(FATE_BWDIF-yes)
+
 FATE_YADIF-$(call FILTERDEMDEC, YADIF, MPEGTS, MPEG2VIDEO) += fate-filter-yadif-mode0 fate-filter-yadif-mode1
-fate-filter-yadif-mode0: CMD = framecrc -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -frames:v 30 -vf yadif=0
-fate-filter-yadif-mode1: CMD = framecrc -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -frames:v 59 -vf yadif=1
+fate-filter-yadif-mode0: CMD = framecrc -ec 0 -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -frames:v 30 -vf yadif=0
+fate-filter-yadif-mode1: CMD = framecrc -ec 0 -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -frames:v 59 -vf yadif=1
 
 FATE_YADIF-$(call FILTERDEMDEC, YADIF SCALE, MPEGTS, MPEG2VIDEO) += fate-filter-yadif10 fate-filter-yadif16
-fate-filter-yadif10: CMD = framecrc -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -flags bitexact -pix_fmt yuv420p10le -frames:v 30 -vf scale,yadif=0
-fate-filter-yadif16: CMD = framecrc -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -flags bitexact -pix_fmt yuv420p16le -frames:v 30 -vf scale,yadif=0
+fate-filter-yadif10: CMD = framecrc -ec 0 -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -flags bitexact -pix_fmt yuv420p10le -frames:v 30 -vf scale,yadif=0
+fate-filter-yadif16: CMD = framecrc -ec 0 -flags bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -flags bitexact -pix_fmt yuv420p16le -frames:v 30 -vf scale,yadif=0
 
 FATE_FILTER_SAMPLES-yes += $(FATE_YADIF-yes)
 
@@ -204,7 +213,7 @@ fate-filter-vstack: CMD = framecrc -c:v pgmyuv -i $(SRC) -c:v pgmyuv -i $(SRC) -
 FATE_FILTER_OVERLAY-$(call FILTERDEMDEC, SCALE OVERLAY, IMAGE2, PGMYUV) += fate-filter-overlay
 fate-filter-overlay: CMD = framecrc -c:v pgmyuv -i $(SRC) -c:v pgmyuv -i $(SRC) -filter_complex_script $(FILTERGRAPH)
 
-FATE_FILTER_OVERLAY-$(call FILTERDEMDEC, SPLIT SCALE PAD OVERLAY, IMAGE2, PGMYUV) += $(addprefix fate-filter-overlay_, rgb yuv420 yuv420p10 nv12 nv21 yuv422 yuv422p10 yuv444)
+FATE_FILTER_OVERLAY-$(call FILTERDEMDEC, SPLIT SCALE PAD OVERLAY, IMAGE2, PGMYUV) += $(addprefix fate-filter-overlay_, rgb yuv420 yuv420p10 nv12 nv21 yuv422 yuv422p10 yuv444 yuv444p10)
 fate-filter-overlay_%: CMD = framecrc -auto_conversion_filters -c:v pgmyuv -i $(SRC) -filter_complex_script $(FILTERGRAPH)
 fate-filter-overlay_yuv420: CMD = framecrc -c:v pgmyuv -i $(SRC) -filter_complex_script $(FILTERGRAPH)
 fate-filter-overlay_%p10: CMD = framecrc -auto_conversion_filters -c:v pgmyuv -i $(SRC) -filter_complex_script $(FILTERGRAPH) -pix_fmt $(@:fate-filter-overlay_%=%)le -frames:v 3
@@ -290,9 +299,10 @@ fate-filter-tblend: CMD = framecrc -c:v pgmyuv -i $(SRC) -vf tblend=all_mode=dif
 FATE_FILTER_VSYNTH_PGMYUV-$(CONFIG_TELECINE_FILTER) += fate-filter-telecine
 fate-filter-telecine: CMD = framecrc -c:v pgmyuv -i $(SRC) -vf telecine
 
-FATE_FILTER-$(call FILTERFRAMECRC, TESTSRC2 TPAD) += fate-filter-tpad-add fate-filter-tpad-clone
+FATE_FILTER-$(call FILTERFRAMECRC, TESTSRC2 TPAD) += fate-filter-tpad-add fate-filter-tpad-clone fate-filter-tpad-add-duration
 fate-filter-tpad-add:   CMD = framecrc -lavfi testsrc2=d=1:r=2,tpad=start=1:stop=3:color=gray
 fate-filter-tpad-clone: CMD = framecrc -lavfi testsrc2=d=1:r=2,tpad=start=1:stop=2:stop_mode=clone:color=black
+fate-filter-tpad-add-duration: CMD = framecrc -lavfi testsrc2=d=1:r=2,tpad=start_duration=0.5s:stop_duration=1.5s:color=gray
 
 FATE_FILTER_VSYNTH_PGMYUV-$(CONFIG_TRANSPOSE_FILTER) += fate-filter-transpose
 fate-filter-transpose: CMD = framecrc -c:v pgmyuv -i $(SRC) -vf transpose
@@ -382,7 +392,7 @@ fate-filter-fps-start-drop: CMD = framecrc -lavfi testsrc2=r=7:d=3.5,fps=3:start
 fate-filter-fps-start-fill: CMD = framecrc -lavfi testsrc2=r=7:d=1.5,setpts=PTS+14,fps=3:start_time=1.5
 
 FATE_FILTER_SAMPLES-$(call FILTERDEMDEC, FPS SCALE, MOV, QTRLE) += fate-filter-fps-cfr fate-filter-fps
-fate-filter-fps-cfr: CMD = framecrc -auto_conversion_filters -i $(TARGET_SAMPLES)/qtrle/apple-animation-variable-fps-bug.mov -r 30 -vsync cfr -pix_fmt yuv420p
+fate-filter-fps-cfr: CMD = framecrc -auto_conversion_filters -i $(TARGET_SAMPLES)/qtrle/apple-animation-variable-fps-bug.mov -r 30 -fps_mode cfr -pix_fmt yuv420p
 fate-filter-fps:     CMD = framecrc -auto_conversion_filters -i $(TARGET_SAMPLES)/qtrle/apple-animation-variable-fps-bug.mov -vf fps=30 -pix_fmt yuv420p
 
 FATE_FILTER_ALPHAEXTRACT_ALPHAMERGE := $(addprefix fate-filter-alphaextract_alphamerge_, rgb yuv)
@@ -445,6 +455,9 @@ fate-filter-vflip_vflip: CMD = video_filter "vflip,vflip"
 FATE_FILTER_VSYNTH_VIDEO_FILTER-$(call ALLYES, SCALE_FILTER FORMAT_FILTER PERMS_FILTER EDGEDETECT_FILTER) += fate-filter-edgedetect fate-filter-edgedetect-colormix
 fate-filter-edgedetect: CMD = video_filter "scale,format=gray,perms=random,edgedetect" -frames:v 20
 fate-filter-edgedetect-colormix: CMD = video_filter "scale,format=gbrp,perms=random,edgedetect=mode=colormix" -frames:v 20
+
+FATE_FILTER_VSYNTH_VIDEO_FILTER-$(CONFIG_MEDIAN_FILTER) += fate-filter-median
+fate-filter-median: CMD = video_filter "median=radius=5"
 
 FATE_FILTER_VSYNTH_VIDEO_FILTER-$(call ALLYES, PERMS_FILTER HUE_FILTER) += fate-filter-hue1 fate-filter-hue2 fate-filter-hue3
 fate-filter-hue1: CMD = video_filter "perms=random,hue=s=sin(2*PI*t)+1" -frames:v 20
@@ -522,6 +535,17 @@ fate-filter-thumbnail: CMD = video_filter "scale,thumbnail=10"
 FATE_FILTER_VSYNTH_VIDEO_FILTER-$(CONFIG_TILE_FILTER) += fate-filter-tile
 fate-filter-tile: CMD = video_filter "tile=3x3:nb_frames=5:padding=7:margin=2"
 
+FATE_FILTER_VSYNTH_VIDEO_FILTER-$(CONFIG_PIXELIZE_FILTER) += fate-filter-pixelize-avg
+fate-filter-pixelize-avg: CMD = video_filter "pixelize=mode=avg"
+
+FATE_FILTER_VSYNTH_VIDEO_FILTER-$(CONFIG_PIXELIZE_FILTER) += fate-filter-pixelize-min
+fate-filter-pixelize-min: CMD = video_filter "pixelize=mode=min"
+
+FATE_FILTER_VSYNTH_VIDEO_FILTER-$(CONFIG_PIXELIZE_FILTER) += fate-filter-pixelize-max
+fate-filter-pixelize-max: CMD = video_filter "pixelize=mode=max"
+
+FATE_FILTER_VSYNTH_VIDEO_FILTER-$(CONFIG_TILTANDSHIFT_FILTER) += fate-filter-tiltandshift
+fate-filter-tiltandshift: CMD = framecrc -c:v pgmyuv -i $(SRC) -flags +bitexact -vf tiltandshift
 
 tests/pixfmts.mak: TAG = GEN
 tests/pixfmts.mak: ffmpeg$(PROGSSUF)$(EXESUF) | tests

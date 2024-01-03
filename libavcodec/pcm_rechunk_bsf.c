@@ -139,6 +139,7 @@ static int rechunk_filter(AVBSFContext *ctx, AVPacket *pkt)
                     av_packet_move_ref(pkt, s->out_pkt);
                     return send_packet(s, nb_samples, pkt);
                 }
+                av_assert0(!s->in_pkt->size);
             } else if (s->in_pkt->size > data_size) {
                 ret = av_packet_ref(pkt, s->in_pkt);
                 if (ret < 0)
@@ -151,7 +152,8 @@ static int rechunk_filter(AVBSFContext *ctx, AVPacket *pkt)
                 av_packet_move_ref(pkt, s->in_pkt);
                 return send_packet(s, nb_samples, pkt);
             }
-        }
+        } else
+            av_packet_unref(s->in_pkt);
 
         ret = ff_bsf_get_packet_ref(ctx, s->in_pkt);
         if (ret == AVERROR_EOF && s->out_pkt->size) {
@@ -185,7 +187,6 @@ static const AVOption options[] = {
 
 static const AVClass pcm_rechunk_class = {
     .class_name = "pcm_rechunk_bsf",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

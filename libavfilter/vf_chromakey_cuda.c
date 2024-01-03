@@ -20,9 +20,7 @@
 
 #include <float.h>
 #include <stdio.h>
-#include <string.h>
 
-#include "libavutil/avstring.h"
 #include "libavutil/common.h"
 #include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_cuda_internal.h"
@@ -32,9 +30,7 @@
 #include "libavutil/pixdesc.h"
 
 #include "avfilter.h"
-#include "formats.h"
 #include "internal.h"
-#include "video.h"
 #include "cuda/load_helper.h"
 
 static const enum AVPixelFormat supported_formats[] = {
@@ -458,7 +454,6 @@ static const AVOption options[] = {
 
 static const AVClass cudachromakey_class = {
     .class_name = "cudachromakey",
-    .item_name = av_default_item_name,
     .option = options,
     .version = LIBAVUTIL_VERSION_INT,
 };

@@ -21,8 +21,6 @@
 #include <libsmbclient.h>
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
-#include "avformat.h"
-#include "internal.h"
 #include "url.h"
 
 typedef struct {
@@ -360,7 +358,6 @@ static const AVOption options[] = {
 
 static const AVClass libsmbclient_context_class = {
     .class_name     = "libsmbc",
-    .item_name      = av_default_item_name,
     .option         = options,
     .version        = LIBAVUTIL_VERSION_INT,
 };

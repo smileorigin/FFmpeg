@@ -22,6 +22,7 @@
 #include "config.h"
 #include "config_components.h"
 
+#include <time.h>
 #if CONFIG_ZLIB
 #include <zlib.h>
 #endif /* CONFIG_ZLIB */
@@ -1205,7 +1206,7 @@ static int process_line(URLContext *h, char *line, int line_count)
             }
         } else if (!av_strcasecmp(tag, "Content-Type")) {
             av_free(s->mime_type);
-            s->mime_type = av_strdup(p);
+            s->mime_type = av_get_token((const char **)&p, ";");
         } else if (!av_strcasecmp(tag, "Set-Cookie")) {
             if (parse_cookie(s, p, &s->cookie_dict))
                 av_log(h, AV_LOG_WARNING, "Unable to parse '%s'\n", p);
@@ -1985,7 +1986,6 @@ static int http_get_short_seek(URLContext *h)
 #define HTTP_CLASS(flavor)                          \
 static const AVClass flavor ## _context_class = {   \
     .class_name = # flavor,                         \
-    .item_name  = av_default_item_name,             \
     .option     = options,                          \
     .version    = LIBAVUTIL_VERSION_INT,            \
 }

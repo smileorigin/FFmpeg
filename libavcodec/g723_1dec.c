@@ -1105,7 +1105,6 @@ static const AVOption options[] = {
 
 static const AVClass g723_1dec_class = {
     .class_name = "G.723.1 decoder",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -1118,6 +1117,10 @@ const FFCodec ff_g723_1_decoder = {
     .priv_data_size = sizeof(G723_1_Context),
     .init           = g723_1_decode_init,
     FF_CODEC_DECODE_CB(g723_1_decode_frame),
-    .p.capabilities = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1,
+    .p.capabilities =
+#if FF_API_SUBFRAMES
+                      AV_CODEC_CAP_SUBFRAMES |
+#endif
+                      AV_CODEC_CAP_DR1,
     .p.priv_class   = &g723_1dec_class,
 };

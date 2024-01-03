@@ -80,7 +80,7 @@ static int ser_read_header(AVFormatContext *s)
     }
 
     st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-    st->codecpar->codec_id = s->iformat->raw_codec_id;
+    st->codecpar->codec_id   = AV_CODEC_ID_RAWVIDEO;
 
     avpriv_set_pts_info(st, 64, ser->framerate.den, ser->framerate.num);
 
@@ -127,7 +127,6 @@ static const AVOption ser_options[] = {
 
 static const AVClass ser_demuxer_class = {
     .class_name = "ser demuxer",
-    .item_name  = av_default_item_name,
     .option     = ser_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

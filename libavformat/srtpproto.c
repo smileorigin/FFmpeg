@@ -21,10 +21,8 @@
 
 #include "libavutil/opt.h"
 #include "avformat.h"
-#include "avio_internal.h"
 #include "url.h"
 
-#include "internal.h"
 #include "rtpdec.h"
 #include "srtp.h"
 
@@ -49,7 +47,6 @@ static const AVOption options[] = {
 
 static const AVClass srtp_context_class = {
     .class_name     = "srtp",
-    .item_name      = av_default_item_name,
     .option         = options,
     .version        = LIBAVUTIL_VERSION_INT,
 };

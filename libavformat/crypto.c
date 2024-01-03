@@ -19,11 +19,9 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "avformat.h"
 #include "libavutil/aes.h"
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
-#include "internal.h"
 #include "url.h"
 
 // encourage reads of 4096 bytes - 1 block is always retained.
@@ -75,7 +73,6 @@ static const AVOption options[] = {
 
 static const AVClass crypto_class = {
     .class_name     = "crypto",
-    .item_name      = av_default_item_name,
     .option         = options,
     .version        = LIBAVUTIL_VERSION_INT,
 };

@@ -28,8 +28,8 @@
 #include "libavutil/opt.h"
 
 #include "libavcodec/ac3_parser_internal.h"
-#include "libavcodec/avcodec.h"
 #include "libavcodec/bytestream.h"
+#include "libavcodec/defs.h"
 #include "libavcodec/h264.h"
 #include "libavcodec/startcode.h"
 
@@ -300,11 +300,11 @@ static int put_arib_caption_descriptor(AVFormatContext *s, uint8_t **q_ptr,
     uint8_t *q = *q_ptr;
 
     switch (codecpar->profile) {
-    case FF_PROFILE_ARIB_PROFILE_A:
+    case AV_PROFILE_ARIB_PROFILE_A:
         stream_identifier = 0x30;
         data_component_id = 0x0008;
         break;
-    case FF_PROFILE_ARIB_PROFILE_C:
+    case AV_PROFILE_ARIB_PROFILE_C:
         stream_identifier = 0x87;
         data_component_id = 0x0012;
         break;
@@ -422,13 +422,16 @@ static int get_dvb_stream_type(AVFormatContext *s, AVStream *st)
     case AV_CODEC_ID_TIMED_ID3:
         stream_type = STREAM_TYPE_METADATA;
         break;
+    case AV_CODEC_ID_SMPTE_2038:
+        stream_type = STREAM_TYPE_PRIVATE_DATA;
+        break;
     case AV_CODEC_ID_DVB_SUBTITLE:
     case AV_CODEC_ID_DVB_TELETEXT:
     case AV_CODEC_ID_ARIB_CAPTION:
         stream_type = STREAM_TYPE_PRIVATE_DATA;
         break;
     case AV_CODEC_ID_SMPTE_KLV:
-        if (st->codecpar->profile == FF_PROFILE_KLVA_SYNC) {
+        if (st->codecpar->profile == AV_PROFILE_KLVA_SYNC) {
             stream_type = STREAM_TYPE_METADATA;
         } else {
             stream_type = STREAM_TYPE_PRIVATE_DATA;
@@ -804,6 +807,8 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
         case AVMEDIA_TYPE_DATA:
             if (codec_id == AV_CODEC_ID_SMPTE_KLV) {
                 put_registration_descriptor(&q, MKTAG('K', 'L', 'V', 'A'));
+            } else if (codec_id == AV_CODEC_ID_SMPTE_2038) {
+                put_registration_descriptor(&q, MKTAG('V', 'A', 'N', 'C'));
             } else if (codec_id == AV_CODEC_ID_TIMED_ID3) {
                 const char *tag = "ID3 ";
                 *q++ = METADATA_DESCRIPTOR;
@@ -2338,7 +2343,6 @@ static const AVOption options[] = {
 
 static const AVClass mpegts_muxer_class = {
     .class_name = "MPEGTS muxer",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -2356,6 +2360,11 @@ const FFOutputFormat ff_mpegts_muxer = {
     .write_trailer  = mpegts_write_end,
     .deinit         = mpegts_deinit,
     .check_bitstream = mpegts_check_bitstream,
+#if FF_API_ALLOW_FLUSH
     .p.flags        = AVFMT_ALLOW_FLUSH | AVFMT_VARIABLE_FPS | AVFMT_NODIMENSIONS,
+#else
+    .p.flags         = AVFMT_VARIABLE_FPS | AVFMT_NODIMENSIONS,
+#endif
+    .flags_internal  = FF_FMT_ALLOW_FLUSH,
     .p.priv_class   = &mpegts_muxer_class,
 };

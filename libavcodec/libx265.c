@@ -220,7 +220,13 @@ static av_cold int libx265_encode_init(AVCodecContext *avctx)
         ctx->params->fpsDenom    = avctx->framerate.den;
     } else {
         ctx->params->fpsNum      = avctx->time_base.den;
-        ctx->params->fpsDenom    = avctx->time_base.num * avctx->ticks_per_frame;
+FF_DISABLE_DEPRECATION_WARNINGS
+        ctx->params->fpsDenom    = avctx->time_base.num
+#if FF_API_TICKS_PER_FRAME
+                                   * avctx->ticks_per_frame
+#endif
+                                   ;
+FF_ENABLE_DEPRECATION_WARNINGS
     }
     ctx->params->sourceWidth     = avctx->width;
     ctx->params->sourceHeight    = avctx->height;
@@ -389,7 +395,7 @@ static av_cold int libx265_encode_init(AVCodecContext *avctx)
     ctx->params->rc.vbvBufferSize = avctx->rc_buffer_size / 1000;
     ctx->params->rc.vbvMaxBitrate = avctx->rc_max_rate    / 1000;
 
-    cpb_props = ff_add_cpb_side_data(avctx);
+    cpb_props = ff_encode_add_cpb_side_data(avctx);
     if (!cpb_props)
         return AVERROR(ENOMEM);
     cpb_props->buffer_size = ctx->params->rc.vbvBufferSize * 1000;
@@ -867,7 +873,6 @@ static const AVOption options[] = {
 
 static const AVClass class = {
     .class_name = "libx265",
-    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

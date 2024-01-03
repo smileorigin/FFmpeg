@@ -30,6 +30,7 @@
 #include "avfilter.h"
 #include "filters.h"
 #include "audio.h"
+#include "formats.h"
 #include "internal.h"
 
 #define SWR_CH_MAX 64
@@ -155,7 +156,7 @@ static int config_output(AVFilterLink *outlink)
     char buf[128];
     int i;
 
-    s->bps = av_get_bytes_per_sample(ctx->outputs[0]->format);
+    s->bps = av_get_bytes_per_sample(outlink->format);
     outlink->time_base   = ctx->inputs[0]->time_base;
 
     av_bprint_init(&bp, 0, AV_BPRINT_SIZE_AUTOMATIC);
@@ -165,7 +166,7 @@ static int config_output(AVFilterLink *outlink)
         av_bprintf(&bp, "%s", buf);
     }
     av_bprintf(&bp, " -> out:");
-    av_channel_layout_describe(&ctx->outputs[0]->ch_layout, buf, sizeof(buf));
+    av_channel_layout_describe(&outlink->ch_layout, buf, sizeof(buf));
     av_bprintf(&bp, "%s", buf);
     av_log(ctx, AV_LOG_VERBOSE, "%s\n", bp.str);
 
@@ -233,7 +234,7 @@ static int try_push_frame(AVFilterContext *ctx, int nb_samples)
         ins[i] = inbuf[i]->data[0];
     }
 
-    outbuf = ff_get_audio_buffer(ctx->outputs[0], nb_samples);
+    outbuf = ff_get_audio_buffer(outlink, nb_samples);
     if (!outbuf) {
         free_frames(s->nb_inputs, inbuf);
         return AVERROR(ENOMEM);
@@ -243,6 +244,10 @@ static int try_push_frame(AVFilterContext *ctx, int nb_samples)
     outbuf->pts = inbuf[0]->pts;
 
     outbuf->nb_samples     = nb_samples;
+    outbuf->duration = av_rescale_q(outbuf->nb_samples,
+                                    av_make_q(1, outlink->sample_rate),
+                                    outlink->time_base);
+
     if ((ret = av_channel_layout_copy(&outbuf->ch_layout, &outlink->ch_layout)) < 0)
         return ret;
 #if FF_API_OLD_CHANNEL_LAYOUT
@@ -274,7 +279,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     }
 
     free_frames(s->nb_inputs, inbuf);
-    return ff_filter_frame(ctx->outputs[0], outbuf);
+    return ff_filter_frame(outlink, outbuf);
 }
 
 static int activate(AVFilterContext *ctx)

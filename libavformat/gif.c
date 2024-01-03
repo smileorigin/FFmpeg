@@ -88,6 +88,8 @@ static int gif_get_delay(GIFContext *gif, AVPacket *prev, AVPacket *new)
         gif->duration = av_clip_uint16(new->pts - prev->pts);
     else if (!new && gif->last_delay >= 0)
         gif->duration = gif->last_delay;
+    else if (prev->duration)
+        gif->duration = prev->duration;
 
     return gif->duration;
 }
@@ -198,7 +200,6 @@ static const AVOption options[] = {
 
 static const AVClass gif_muxer_class = {
     .class_name = "GIF muxer",
-    .item_name  = av_default_item_name,
     .version    = LIBAVUTIL_VERSION_INT,
     .option     = options,
 };

@@ -42,7 +42,6 @@ static const AVOption tedcaptions_options[] = {
 
 static const AVClass tedcaptions_demuxer_class = {
     .class_name = "tedcaptions_demuxer",
-    .item_name  = av_default_item_name,
     .option     = tedcaptions_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -244,7 +243,7 @@ static int parse_file(AVIOContext *pb, FFDemuxSubtitlesQueue *subs)
             ret = AVERROR_INVALIDDATA;
             goto fail;
         }
-        pkt = ff_subtitles_queue_insert(subs, content.str, content.len, 0);
+        pkt = ff_subtitles_queue_insert_bprint(subs, &content, 0);
         if (!pkt) {
             ret = AVERROR(ENOMEM);
             goto fail;

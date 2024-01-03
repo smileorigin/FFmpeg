@@ -543,15 +543,19 @@ static inline CopyRet copy_frame(AVCodecContext *avctx,
         av_image_copy_plane(dst, dStride, src, sStride, bwidth, height);
     }
 
-    frame->interlaced_frame = interlaced;
+    frame->flags |= AV_FRAME_FLAG_INTERLACED * !!interlaced;
     if (interlaced)
-        frame->top_field_first = !bottom_first;
+        frame->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST * !bottom_first;
 
     frame->pts = pkt_pts;
 
-    frame->pkt_pos = -1;
     frame->duration = 0;
+#if FF_API_FRAME_PKT
+FF_DISABLE_DEPRECATION_WARNINGS
+    frame->pkt_pos = -1;
     frame->pkt_size = -1;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
 
     if (!priv->need_second_field) {
         *got_frame       = 1;
@@ -774,7 +778,6 @@ static int crystalhd_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 #define DEFINE_CRYSTALHD_DECODER(x, X, bsf_name) \
     static const AVClass x##_crystalhd_class = { \
         .class_name = #x "_crystalhd", \
-        .item_name = av_default_item_name, \
         .option = options, \
         .version = LIBAVUTIL_VERSION_INT, \
     }; \

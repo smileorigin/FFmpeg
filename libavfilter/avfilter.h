@@ -131,6 +131,11 @@ enum AVMediaType avfilter_pad_get_type(const AVFilterPad *pads, int pad_idx);
  *   received by the filter on one of its inputs.
  */
 #define AVFILTER_FLAG_METADATA_ONLY         (1 << 3)
+
+/**
+ * The filter can create hardware frames using AVFilterContext.hw_device_ctx.
+ */
+#define AVFILTER_FLAG_HWDEVICE              (1 << 4)
 /**
  * Some filters support a generic "enable" expression option that can be used
  * to enable or disable a filter in the timeline. Filters supporting this
@@ -296,6 +301,14 @@ typedef struct AVFilter {
          * @ref AVFilterFormatsConfig.formats "incfg.formats"
          * on every output link to a list of pixel/sample formats that the filter
          * supports on that link.
+         * For video links, this filter may also set
+         * @ref AVFilterFormatsConfig.color_spaces "incfg.color_spaces"
+         *  /
+         * @ref AVFilterFormatsConfig.color_spaces "outcfg.color_spaces"
+         * and @ref AVFilterFormatsConfig.color_ranges "incfg.color_ranges"
+         *  /
+         * @ref AVFilterFormatsConfig.color_ranges "outcfg.color_ranges"
+         * analogously.
          * For audio links, this filter must also set
          * @ref AVFilterFormatsConfig.samplerates "incfg.samplerates"
          *  /
@@ -316,6 +329,10 @@ typedef struct AVFilter {
          * by AV_PIX_FMT_NONE. The generic code will use this list
          * to indicate that this filter supports each of these pixel formats,
          * provided that all inputs and outputs use the same pixel format.
+         *
+         * In addition to that the generic code will mark all inputs
+         * and all outputs as supporting all color spaces and ranges, as
+         * long as all inputs and outputs use the same color space/range.
          *
          * This list must never be NULL if the union is in this state.
          * The type of all inputs and outputs of filters using this must
@@ -444,6 +461,10 @@ struct AVFilterContext {
      * in particular, a filter which consumes or processes hardware frames will
      * instead use the hw_frames_ctx field in AVFilterLink to carry the
      * hardware context information.
+     *
+     * May be set by the caller on filters flagged with AVFILTER_FLAG_HWDEVICE
+     * before initializing the filter with avfilter_init_str() or
+     * avfilter_init_dict().
      */
     AVBufferRef *hw_device_ctx;
 
@@ -505,6 +526,12 @@ typedef struct AVFilterFormatsConfig {
      */
     AVFilterChannelLayouts  *channel_layouts;
 
+    /**
+     * Lists of supported YUV color metadata, only for YUV video.
+     */
+    AVFilterFormats *color_spaces;  ///< AVColorSpace
+    AVFilterFormats *color_ranges;  ///< AVColorRange
+
 } AVFilterFormatsConfig;
 
 /**
@@ -555,6 +582,16 @@ struct AVFilterLink {
     AVRational time_base;
 
     AVChannelLayout ch_layout;  ///< channel layout of current buffer (see libavutil/channel_layout.h)
+
+    /**
+     * For non-YUV links, these are respectively set to fallback values (as
+     * appropriate for that colorspace).
+     *
+     * Note: This includes grayscale formats, as these are currently treated
+     * as forced full range always.
+     */
+    enum AVColorSpace colorspace;   ///< agreed upon YUV color space
+    enum AVColorRange color_range;  ///< agreed upon YUV color range
 
     /*****************************************************************
      * All fields below this line are not part of the public API. They

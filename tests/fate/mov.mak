@@ -17,6 +17,7 @@ FATE_MOV = fate-mov-3elist \
            fate-mov-bbi-elst-starts-b \
            fate-mov-neg-firstpts-discard-frames \
            fate-mov-stream-shorter-than-movie \
+           fate-mov-pcm-remux \
 # FIXME: Uncomment these two lines once the test files are uploaded to the fate
 # server.
 #           fate-mov-avif-demux-still-image-1-item \
@@ -98,8 +99,8 @@ fate-mov-neg-firstpts-discard: CMD = run ffprobe$(PROGSSUF)$(EXESUF) -show_entri
 # with negative timestamps (skip_samples is not set for Vorbis, so ffmpeg computes start_time as negative if not specified by demuxer).
 fate-mov-neg-firstpts-discard-vorbis: CMD = run ffprobe$(PROGSSUF)$(EXESUF) -show_entries stream=start_time -bitexact $(TARGET_SAMPLES)/mov/mov_neg_first_pts_discard_vorbis.mp4
 
-# Makes sure that expected frames are generated for mov_neg_first_pts_discard.mov with -vsync cfr
-fate-mov-neg-firstpts-discard-frames: CMD = framemd5 -flags +bitexact -i $(TARGET_SAMPLES)/mov/mov_neg_first_pts_discard.mov -vsync cfr
+# Makes sure that expected frames are generated for mov_neg_first_pts_discard.mov with -fps_mode cfr
+fate-mov-neg-firstpts-discard-frames: CMD = framemd5 -flags +bitexact -i $(TARGET_SAMPLES)/mov/mov_neg_first_pts_discard.mov -fps_mode cfr
 
 # Makes sure that no frame is dropped/duplicated with fps filter due to start_time / duration miscalculations.
 fate-mov-stream-shorter-than-movie: CMD = framemd5 -flags +bitexact -i $(TARGET_SAMPLES)/mov/mov_stream_shorter_than_movie.mov -vf fps=fps=24 -an
@@ -176,6 +177,11 @@ FATE_MOV_FFMPEG-$(call TRANSCODE, PCM_S16LE, MOV, WAV_DEMUXER PAN_FILTER) \
                           += fate-mov-mp4-pcm-float
 fate-mov-mp4-pcm-float: tests/data/asynth-44100-1.wav
 fate-mov-mp4-pcm-float: CMD = transcode wav $(TARGET_PATH)/tests/data/asynth-44100-1.wav mp4 "-af aresample,pan=FL+LFE+BR|c0=c0|c1=c0|c2=c0 -c:a pcm_f32le" "-map 0 -c copy -frames:a 0"
+
+fate-mov-pcm-remux: tests/data/asynth-44100-1.wav
+fate-mov-pcm-remux: CMD = md5 -i $(TARGET_PATH)/tests/data/asynth-44100-1.wav -map 0 -c copy -fflags +bitexact -f mp4
+fate-mov-pcm-remux: CMP = oneline
+fate-mov-pcm-remux: REF = e76115bc392d702da38f523216bba165
 
 FATE_FFMPEG += $(FATE_MOV_FFMPEG-yes)
 

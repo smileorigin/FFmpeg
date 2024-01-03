@@ -828,14 +828,18 @@ static int qsv_decode(AVCodecContext *avctx, QSVContext *q,
             outsurf->Info.PicStruct & MFX_PICSTRUCT_FRAME_TRIPLING ? 4 :
             outsurf->Info.PicStruct & MFX_PICSTRUCT_FRAME_DOUBLING ? 2 :
             outsurf->Info.PicStruct & MFX_PICSTRUCT_FIELD_REPEATED ? 1 : 0;
-        frame->top_field_first =
-            outsurf->Info.PicStruct & MFX_PICSTRUCT_FIELD_TFF;
-        frame->interlaced_frame =
+        frame->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST *
+            !!(outsurf->Info.PicStruct & MFX_PICSTRUCT_FIELD_TFF);
+        frame->flags |= AV_FRAME_FLAG_INTERLACED *
             !(outsurf->Info.PicStruct & MFX_PICSTRUCT_PROGRESSIVE);
         frame->pict_type = ff_qsv_map_pictype(aframe.frame->dec_info.FrameType);
         //Key frame is IDR frame is only suitable for H264. For HEVC, IRAPs are key frames.
-        if (avctx->codec_id == AV_CODEC_ID_H264)
-            frame->key_frame = !!(aframe.frame->dec_info.FrameType & MFX_FRAMETYPE_IDR);
+        if (avctx->codec_id == AV_CODEC_ID_H264) {
+            if (aframe.frame->dec_info.FrameType & MFX_FRAMETYPE_IDR)
+                frame->flags |= AV_FRAME_FLAG_KEY;
+            else
+                frame->flags &= ~AV_FRAME_FLAG_KEY;
+        }
 
         /* update the surface properties */
         if (avctx->pix_fmt == AV_PIX_FMT_QSV)
@@ -913,7 +917,7 @@ static int qsv_process_data(AVCodecContext *avctx, QSVContext *q,
         ret = qsv_decode_header(avctx, q, pkt, pix_fmt, &param);
         if (ret < 0) {
             if (ret == AVERROR(EAGAIN))
-                av_log(avctx, AV_LOG_INFO, "More data is required to decode header\n");
+                av_log(avctx, AV_LOG_VERBOSE, "More data is required to decode header\n");
             else
                 av_log(avctx, AV_LOG_ERROR, "Error decoding header\n");
             goto reinit_fail;
@@ -1072,6 +1076,9 @@ static int qsv_decode_frame(AVCodecContext *avctx, AVFrame *frame,
 
         ret = qsv_process_data(avctx, &s->qsv, frame, got_frame, &s->buffer_pkt);
         if (ret < 0){
+            if (ret == AVERROR(EAGAIN))
+                ret = 0;
+
             /* Drop buffer_pkt when failed to decode the packet. Otherwise,
                the decoder will keep decoding the failure packet. */
             av_packet_unref(&s->buffer_pkt);
@@ -1103,7 +1110,6 @@ static void qsv_decode_flush(AVCodecContext *avctx)
 #define DEFINE_QSV_DECODER_WITH_OPTION(x, X, bsf_name, opt) \
 static const AVClass x##_qsv_class = { \
     .class_name = #x "_qsv", \
-    .item_name  = av_default_item_name, \
     .option     = opt, \
     .version    = LIBAVUTIL_VERSION_INT, \
 }; \

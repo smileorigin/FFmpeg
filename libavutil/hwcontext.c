@@ -36,6 +36,9 @@ static const HWContextType * const hw_table[] = {
 #if CONFIG_D3D11VA
     &ff_hwcontext_type_d3d11va,
 #endif
+#if CONFIG_D3D12VA
+    &ff_hwcontext_type_d3d12va,
+#endif
 #if CONFIG_LIBDRM
     &ff_hwcontext_type_drm,
 #endif
@@ -71,6 +74,7 @@ static const char *const hw_type_names[] = {
     [AV_HWDEVICE_TYPE_DRM]    = "drm",
     [AV_HWDEVICE_TYPE_DXVA2]  = "dxva2",
     [AV_HWDEVICE_TYPE_D3D11VA] = "d3d11va",
+    [AV_HWDEVICE_TYPE_D3D12VA] = "d3d12va",
     [AV_HWDEVICE_TYPE_OPENCL] = "opencl",
     [AV_HWDEVICE_TYPE_QSV]    = "qsv",
     [AV_HWDEVICE_TYPE_VAAPI]  = "vaapi",
@@ -116,7 +120,6 @@ enum AVHWDeviceType av_hwdevice_iterate_types(enum AVHWDeviceType prev)
 
 static const AVClass hwdevice_ctx_class = {
     .class_name = "AVHWDeviceContext",
-    .item_name  = av_default_item_name,
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
@@ -218,7 +221,6 @@ fail:
 
 static const AVClass hwframe_ctx_class = {
     .class_name = "AVHWFramesContext",
-    .item_name  = av_default_item_name,
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
@@ -819,8 +821,7 @@ int av_hwframe_map(AVFrame *dst, const AVFrame *src, int flags)
                 return AVERROR(EINVAL);
             }
             hwmap = (HWMapDescriptor*)src->buf[0]->data;
-            av_frame_unref(dst);
-            return av_frame_ref(dst, hwmap->source);
+            return av_frame_replace(dst, hwmap->source);
         }
     }
 
@@ -950,6 +951,5 @@ fail:
 int ff_hwframe_map_replace(AVFrame *dst, const AVFrame *src)
 {
     HWMapDescriptor *hwmap = (HWMapDescriptor*)dst->buf[0]->data;
-    av_frame_unref(hwmap->source);
-    return av_frame_ref(hwmap->source, src);
+    return av_frame_replace(hwmap->source, src);
 }

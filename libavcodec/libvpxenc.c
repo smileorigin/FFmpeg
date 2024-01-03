@@ -1145,7 +1145,7 @@ static av_cold int vpx_init(AVCodecContext *avctx,
     /* 0-3: For non-zero values the encoder increasingly optimizes for reduced
        complexity playback on low powered devices at the expense of encode
        quality. */
-    if (avctx->profile != FF_PROFILE_UNKNOWN)
+    if (avctx->profile != AV_PROFILE_UNKNOWN)
         enccfg.g_profile = avctx->profile;
 
     enccfg.g_error_resilient = ctx->error_resilient || ctx->flags & VP8F_ERROR_RESILIENT;
@@ -1273,7 +1273,7 @@ static av_cold int vpx_init(AVCodecContext *avctx,
         ctx->rawimg.bit_depth = enccfg.g_bit_depth;
 #endif
 
-    cpb_props = ff_add_cpb_side_data(avctx);
+    cpb_props = ff_encode_add_cpb_side_data(avctx);
     if (!cpb_props)
         return AVERROR(ENOMEM);
 
@@ -1692,6 +1692,7 @@ static int vpx_encode(AVCodecContext *avctx, AVPacket *pkt,
     const struct vpx_codec_enc_cfg *enccfg = ctx->encoder.config.enc;
     vpx_svc_layer_id_t layer_id;
     int layer_id_valid = 0;
+    unsigned long duration = 0;
 
     if (avctx->qmax >= 0 && enccfg->rc_max_quantizer != avctx->qmax) {
         struct vpx_codec_enc_cfg cfg = *enccfg;
@@ -1779,9 +1780,11 @@ static int vpx_encode(AVCodecContext *avctx, AVPacket *pkt,
             }
         }
 
-        res = frame_data_submit(avctx, ctx->fifo, frame);
-        if (res < 0)
-            return res;
+        if (!(avctx->flags & AV_CODEC_FLAG_PASS1)) {
+            res = frame_data_submit(avctx, ctx->fifo, frame);
+            if (res < 0)
+                return res;
+        }
     }
 
     // this is for encoding with preset temporal layering patterns defined in
@@ -1820,8 +1823,25 @@ static int vpx_encode(AVCodecContext *avctx, AVPacket *pkt,
 #endif
     }
 
+    if (frame && frame->duration > ULONG_MAX) {
+        av_log(avctx, AV_LOG_WARNING,
+               "Frame duration too large: %"PRId64"\n", frame->duration);
+    } else if (frame && frame->duration)
+        duration = frame->duration;
+    else if (avctx->framerate.num > 0 && avctx->framerate.den > 0)
+        duration = av_rescale_q(1, av_inv_q(avctx->framerate), avctx->time_base);
+    else {
+FF_DISABLE_DEPRECATION_WARNINGS
+        duration =
+#if FF_API_TICKS_PER_FRAME
+            avctx->ticks_per_frame ? avctx->ticks_per_frame :
+#endif
+            1;
+FF_ENABLE_DEPRECATION_WARNINGS
+    }
+
     res = vpx_codec_encode(&ctx->encoder, rawimg, timestamp,
-                           avctx->ticks_per_frame, flags, ctx->deadline);
+                           duration, flags, ctx->deadline);
     if (res != VPX_CODEC_OK) {
         log_encoder_error(avctx, "Error encoding frame");
         return AVERROR_INVALIDDATA;
@@ -1829,7 +1849,7 @@ static int vpx_encode(AVCodecContext *avctx, AVPacket *pkt,
 
     if (ctx->is_alpha) {
         res = vpx_codec_encode(&ctx->encoder_alpha, rawimg_alpha, timestamp,
-                               avctx->ticks_per_frame, flags, ctx->deadline);
+                               duration, flags, ctx->deadline);
         if (res != VPX_CODEC_OK) {
             log_encoder_error(avctx, "Error encoding alpha frame");
             return AVERROR_INVALIDDATA;
@@ -2003,7 +2023,6 @@ static av_cold int vp8_init(AVCodecContext *avctx)
 
 static const AVClass class_vp8 = {
     .class_name = "libvpx-vp8 encoder",
-    .item_name  = av_default_item_name,
     .option     = vp8_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
@@ -2076,7 +2095,6 @@ static av_cold void vp9_init_static(FFCodec *codec)
 
 static const AVClass class_vp9 = {
     .class_name = "libvpx-vp9 encoder",
-    .item_name  = av_default_item_name,
     .option     = vp9_options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

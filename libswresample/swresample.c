@@ -196,11 +196,11 @@ av_cold int swr_init(struct SwrContext *s){
 
     clear_context(s);
 
-    if(s-> in_sample_fmt >= AV_SAMPLE_FMT_NB){
+    if((unsigned) s-> in_sample_fmt >= AV_SAMPLE_FMT_NB){
         av_log(s, AV_LOG_ERROR, "Requested input sample format %d is invalid\n", s->in_sample_fmt);
         return AVERROR(EINVAL);
     }
-    if(s->out_sample_fmt >= AV_SAMPLE_FMT_NB){
+    if((unsigned) s->out_sample_fmt >= AV_SAMPLE_FMT_NB){
         av_log(s, AV_LOG_ERROR, "Requested output sample format %d is invalid\n", s->out_sample_fmt);
         return AVERROR(EINVAL);
     }
@@ -331,8 +331,14 @@ av_cold int swr_init(struct SwrContext *s){
                  s->rematrix_custom;
 
     if(s->int_sample_fmt == AV_SAMPLE_FMT_NONE){
+        // 16bit or less to 16bit or less with the same sample rate
         if(   av_get_bytes_per_sample(s-> in_sample_fmt) <= 2
-           && av_get_bytes_per_sample(s->out_sample_fmt) <= 2){
+           && av_get_bytes_per_sample(s->out_sample_fmt) <= 2
+           && s->out_sample_rate==s->in_sample_rate) {
+            s->int_sample_fmt= AV_SAMPLE_FMT_S16P;
+        // 8 -> 8, 16->8, 8->16bit
+        } else if(   av_get_bytes_per_sample(s-> in_sample_fmt)
+                    +av_get_bytes_per_sample(s->out_sample_fmt) <= 3 ) {
             s->int_sample_fmt= AV_SAMPLE_FMT_S16P;
         }else if(   av_get_bytes_per_sample(s-> in_sample_fmt) <= 2
            && !s->rematrix
@@ -369,8 +375,9 @@ av_cold int swr_init(struct SwrContext *s){
     if (s->firstpts_in_samples != AV_NOPTS_VALUE) {
         if (!s->async && s->min_compensation >= FLT_MAX/2)
             s->async = 1;
-        s->firstpts =
-        s->outpts   = s->firstpts_in_samples * s->out_sample_rate;
+        if (s->firstpts == AV_NOPTS_VALUE)
+            s->firstpts =
+            s->outpts   = s->firstpts_in_samples * s->out_sample_rate;
     } else
         s->firstpts = AV_NOPTS_VALUE;
 
